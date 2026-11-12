@@ -238,9 +238,13 @@ lv.register_vision_adapter(
         "scene": "an AI music generator page with a song and a waveform",
         "objects": [{"label": "ai music generator", "confidence": 0.9}],
         "text": ["Suno"],
-        "model": "test-vision",
+        "model": "test-vision-origin",
         "from_model": True,
         "confidence": 0.9,
+        # This model was trained to tell how the content was made.
+        "kind": "ai_origin",
+        "frame_index": 0,
+        "frames_read": 1,
     }
 )
 result = la.analyze_locally(
@@ -281,6 +285,59 @@ check(
     "the verdict says it is not AI music",
     result.content_is_ai_music is False,
     str(result.content_is_ai_music),
+)
+lv.clear_vision_adapters()
+
+print("\n== 10b. a model that only names things cannot prove the origin ==")
+# A model of names alone, like a model that knows what an object is.
+# It proves that music is in the picture. It does not prove that the
+# music was made with a machine.
+lv.clear_vision_adapters()
+lv.register_vision_adapter(
+    lambda frames: {
+        "scene": "a grand piano on a stage",
+        "objects": [{"label": "grand piano", "confidence": 0.94}],
+        "text": [],
+        "model": "test-vision-classifier",
+        "from_model": True,
+        "confidence": 0.94,
+        "kind": "objects",
+    }
+)
+result = la.analyze_locally(
+    [_frame((30, 30, 40))],
+    {"title": "x", "creator": "y", "source_url": "u"},
+)
+topic = result.findings["topic_fit"]
+check(
+    "the topic stays a possibility",
+    topic.certainty == la.POSSIBILITY,
+    topic.certainty,
+)
+check(
+    "the question stays open",
+    result.content_is_ai_music is None,
+    str(result.content_is_ai_music),
+)
+check(
+    "the reason says the origin was not proved",
+    "chưa chứng minh" in topic.reason or "chưa đủ bằng chứng" in topic.reason,
+    topic.reason,
+)
+check(
+    "the reading names the model",
+    "test-vision-classifier" in topic.reason,
+    topic.reason,
+)
+check(
+    "the reading says which frame it came from",
+    "khung" in topic.reason,
+    topic.reason,
+)
+check(
+    "the model cannot tell the origin",
+    result.vision.reading.can_tell_ai_origin is False,
+    str(result.vision.reading.kind),
 )
 lv.clear_vision_adapters()
 
@@ -347,8 +404,8 @@ check(
     str(sum(la._FINDING_MAX.values())),
 )
 check(
-    "the version was not raised",
-    la.ANALYZER_VERSION == "local-v2",
+    "the version was raised for the new measurements",
+    la.ANALYZER_VERSION == "local-v3",
     la.ANALYZER_VERSION,
 )
 check(
@@ -432,6 +489,227 @@ if real_models:
         check("the adapter answers without breaking", False, f"{type(exc).__name__}: {exc}")
 else:
     print("[SKIP] there is no real model on this machine")
+
+print("\n== 16. the screen of a music tool is told apart from a plain picture ==")
+music_screen = lv.measure_production_ui([_music_ui()] * 3)
+plain_picture = lv.measure_production_ui([_frame()] * 3)
+check("the music screen was measured", music_screen["frames_used"] == 3, str(music_screen))
+check("the plain picture was measured", plain_picture["frames_used"] == 3, str(plain_picture))
+check(
+    "the music screen carries a waveform",
+    music_screen["waveform"] > 0.2,
+    str(music_screen["waveform"]),
+)
+check(
+    "the plain picture carries no waveform",
+    plain_picture["waveform"] < 0.05,
+    str(plain_picture["waveform"]),
+)
+check(
+    "the music screen scores higher",
+    music_screen["score"] > plain_picture["score"] + 0.2,
+    f"{music_screen['score']} vs {plain_picture['score']}",
+)
+check(
+    "a measure of the pixels stays a possibility",
+    music_screen["certainty"] == lv.POSSIBILITY,
+    music_screen["certainty"],
+)
+check(
+    "a plain picture is not a music screen",
+    plain_picture["score"] < 0.2,
+    str(plain_picture["score"]),
+)
+no_frames = lv.measure_production_ui([])
+check(
+    "no frames means no measure",
+    no_frames["certainty"] == lv.NO_DATA,
+    no_frames["certainty"],
+)
+
+print("\n== 17. the analyzer uses the measure of the music screen ==")
+screen_result = la.analyze_locally(
+    [_music_ui()] * 3,
+    {"title": "x", "creator": "y", "source_url": "u"},
+)
+plain_result = la.analyze_locally(
+    [_frame()] * 3,
+    {"title": "x", "creator": "y", "source_url": "u"},
+)
+screen_topic = screen_result.findings["topic_fit"]
+plain_topic = plain_result.findings["topic_fit"]
+check(
+    "the music screen keeps more points than the plain picture",
+    screen_topic.points > plain_topic.points,
+    f"{screen_topic.points} vs {plain_topic.points}",
+)
+check(
+    "the plain picture is not decided",
+    plain_topic.certainty in (la.UNDETERMINED, la.POSSIBILITY),
+    plain_topic.certainty,
+)
+
+print("\n== 18. the state of the text reading is reported ==")
+has_ocr, ocr_note = lv.ocr_available()
+check("the state of the text reading is a pair", isinstance(has_ocr, bool) and isinstance(ocr_note, str))
+if has_ocr:
+    check("the text reading is available", True, ocr_note)
+else:
+    check("the text reading is missing", True, ocr_note)
+    check(
+        "the reason names what is missing",
+        "OCR" in ocr_note or "chữ" in ocr_note,
+        ocr_note,
+    )
+report = lv.analyze_vision([_music_ui(), _frame()])
+check(
+    "the report carries the state of the text reading",
+    isinstance(report.ocr_available, bool),
+    str(report.ocr_available),
+)
+check(
+    "the report says what is missing when it is missing",
+    report.ocr_available or bool(report.ocr_missing),
+    report.ocr_missing,
+)
+check(
+    "no text is invented when the machine cannot read text",
+    report.reading.from_model or not report.reading.text,
+    str(report.reading.text),
+)
+
+print("\n== 19. the kind of the model is known ==")
+check(
+    "a reading knows if it can tell the origin",
+    hasattr(lv.VisionReading(), "can_tell_ai_origin"),
+)
+plain_reading = lv.VisionReading(from_model=True, kind="objects")
+origin_reading = lv.VisionReading(from_model=True, kind="ai_origin")
+check(
+    "a model of names cannot tell the origin",
+    plain_reading.can_tell_ai_origin is False,
+    plain_reading.kind,
+)
+check(
+    "a model of the origin can tell it",
+    origin_reading.can_tell_ai_origin is True,
+    origin_reading.kind,
+)
+check(
+    "a reading that is not from a model cannot tell it",
+    lv.VisionReading(from_model=False, kind="ai_origin").can_tell_ai_origin is False,
+)
+converted = lv.reading_from_dict({"kind": "ai_origin", "from_model": True, "model": "m"})
+check("the kind survives the conversion", converted.kind == "ai_origin", converted.kind)
+odd = lv.reading_from_dict({"kind": "something else"})
+check("an unknown kind falls back to names", odd.kind == "objects", odd.kind)
+
+print("\n== 20. the report carries where the reading came from ==")
+lv.clear_vision_adapters()
+lv.register_vision_adapter(
+    lambda frames: {
+        "scene": "a music studio screen",
+        "objects": [{"label": "waveform", "confidence": 0.9}],
+        "model": "m",
+        "from_model": True,
+        "confidence": 0.9,
+        "kind": "objects",
+        "frame_index": 2,
+        "frames_read": 5,
+    }
+)
+report = lv.analyze_vision([_music_ui()] * 5)
+check(
+    "the frame the reading came from is known",
+    report.reading.frame_index == 2,
+    str(report.reading.frame_index),
+)
+check(
+    "the number of frames read is known",
+    report.reading.frames_read == 5,
+    str(report.reading.frames_read),
+)
+check(
+    "the reading is evidence",
+    report.reading.certainty == lv.EVIDENCE,
+    report.reading.certainty,
+)
+lv.clear_vision_adapters()
+
+print("\n== 21. a real ONNX model runs on this machine ==")
+# The probe model is a real ONNX file that the runtime of this machine
+# opens and runs. It does not understand music; it proves that the whole
+# path works: the file is found, the runtime opens it, the frames are
+# given to it and what it says comes back.
+probe = Path("data/temp/tooltdh_probe.onnx")
+probe_labels = [
+    "waveform",
+    "audio workstation",
+    "grand piano",
+    "stage performance",
+    "cat",
+]
+try:
+    from _make_probe_model import build_onnx
+
+    probe.parent.mkdir(parents=True, exist_ok=True)
+    build_onnx(str(probe), probe_labels)
+    check("the probe model was built", probe.is_file(), str(probe))
+except Exception as exc:
+    check("the probe model was built", False, f"{type(exc).__name__}: {exc}")
+
+if probe.is_file():
+    check("the probe model is really on the machine", probe.stat().st_size > 0, str(probe))
+    probe_adapter = lv.onnx_vision_adapter(str(probe))
+    check("an adapter is built for the real model", probe_adapter is not None)
+    try:
+        probe_result = probe_adapter([_music_ui(), _frame((180, 60, 60))])
+        check(
+            "the real model answers",
+            isinstance(probe_result, dict),
+            str(probe_result)[:120],
+        )
+        check(
+            "the answer names the model",
+            str((probe_result or {}).get("model") or "").endswith(".onnx"),
+            str((probe_result or {}).get("model")),
+        )
+        check(
+            "the answer says what kind of model it is",
+            (probe_result or {}).get("kind") == "objects",
+            str((probe_result or {}).get("kind")),
+        )
+        check(
+            "the answer says which frames were read",
+            int((probe_result or {}).get("frames_read") or 0) == 2,
+            str((probe_result or {}).get("frames_read")),
+        )
+    except Exception as exc:
+        check("the real model answers", False, f"{type(exc).__name__}: {exc}")
+
+    # The model is a model of names. It must not be taken for a model
+    # that can say how the content was made.
+    lv.clear_vision_adapters()
+    lv.register_vision_adapter(probe_adapter)
+    probe_result = la.analyze_locally(
+        [_music_ui()],
+        {"title": "x", "creator": "y", "source_url": "u"},
+    )
+    probe_topic = probe_result.findings["topic_fit"]
+    check(
+        "the real model does not prove the origin",
+        probe_result.content_is_ai_music is None
+        or probe_result.content_is_ai_music is False,
+        str(probe_result.content_is_ai_music),
+    )
+    check(
+        "the reading of the real model is evidence",
+        probe_result.vision.reading.certainty == lv.EVIDENCE,
+        probe_result.vision.reading.certainty,
+    )
+    lv.clear_vision_adapters()
+else:
+    print("[SKIP] the probe model is not on this machine")
 
 print()
 if FAILED:

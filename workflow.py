@@ -257,6 +257,60 @@ def _selected_from_review(task_id: str) -> DiscoveredVideo | None:
     return select_candidate(task_id, index)
 
 
+def _local_caption_facts(
+    media_path: Path,
+    metadata: dict[str, Any],
+    selected: DiscoveredVideo | None = None,
+) -> dict[str, Any]:
+    """Return the facts the local analyzers really measured about the media.
+
+    The sound and the picture are measured on this machine, on the file
+    that was already downloaded. Nothing is fetched and no paid service
+    is called. When a fact was not measured, it is simply not in the
+    result, so a caption never names something the machine did not read.
+    """
+    facts: dict[str, Any] = {}
+
+    # The sound, when the machine can really decode the track.
+    try:
+        from local_analyzer import measure_audio
+
+        audio = measure_audio(str(media_path)) if media_path else None
+    except Exception:
+        audio = None
+    if isinstance(audio, dict) and audio.get("decoded"):
+        sound: dict[str, Any] = {"measured": True}
+        for key in ("tempo_bpm", "tempo_confidence", "mean_volume_db", "duration"):
+            if audio.get(key) is not None:
+                sound[key] = audio.get(key)
+        if sound.get("duration") is not None:
+            sound["duration_seconds"] = audio.get("duration")
+        if sound.get("mean_volume_db") is not None:
+            sound["loudness_db"] = audio.get("mean_volume_db")
+        facts["sound"] = sound
+
+    # The picture, when the frames of the discovery are still on the
+    # machine. They are read from the cache of the discovery, so the
+    # video is never read a second time.
+    try:
+        from candidate_analysis import _cache_key, _decode_frames, load_cache
+
+        if selected is not None:
+            cache = load_cache()
+            entry = cache.get(_cache_key(selected)) or {}
+            frames = _decode_frames(entry.get("frames") or []) if isinstance(entry, dict) else []
+            if frames:
+                from local_vision import analyze_vision
+
+                vision = analyze_vision(frames).to_dict()
+                if vision.get("reading", {}).get("from_model") or vision.get("production_ui"):
+                    facts["vision"] = vision
+    except Exception:
+        pass
+
+    return facts
+
+
 def _resolve_candidate_media_link(
     selected: DiscoveredVideo,
     fetch_text: Callable[[str], str],
@@ -380,7 +434,33 @@ def run_workflow(
             f"the previous run reached {resume_state.get('status', 'UNKNOWN')}"
         )
         steps.append("resume")
-        if str(resume_state.get("status", "")) == "DRAFT_SAVED":
+        resume_status = str(resume_state.get("status", "")).strip().upper()
+        if resume_status == "PUBLISHED":
+            # The post already went out. The run never publishes a second
+            # time, so a retry or a resume cannot double post.
+            posted = str(resume_state.get("posted_url", "") or "").strip()
+            reason = (
+                "The task was already published, so nothing was posted again. "
+                f"The post that is live: {posted or 'the address was not recorded'}"
+            )
+            log(f"state: PUBLISHED -> decision: SKIP publish | reason: {reason}")
+            return WorkflowResult(
+                status="PUBLISHED",
+                reason=reason,
+                task_id=task_id,
+                source_url=str(resume_state.get("source_url", "")),
+                creator=str(resume_state.get("creator", "")),
+                caption=str(resume_state.get("caption", "")),
+                hashtags=list(resume_state.get("hashtags", []) or []),
+                sha256=str(resume_state.get("sha256", "")),
+                temp_path=str(resume_state.get("temp_path", "")),
+                original_path=str(resume_state.get("original_path", "")),
+                draft_reference=str(resume_state.get("draft_reference", "")),
+                posted_url=posted,
+                provider=str(resume_state.get("provider", "")),
+                steps=steps,
+            )
+        if resume_status == "DRAFT_SAVED":
             draft_reference = str(resume_state.get("draft_reference", ""))
             reason = (
                 "The draft was already saved in an earlier run and waits for human "
@@ -580,7 +660,29 @@ def run_workflow(
     )
 
     # 4. Analyse the video content and write a caption that matches it.
+    # The facts that the local analyzers really measured are attached to
+    # the metadata, so the caption describes the video that was measured
+    # and not a generic template. Nothing is fetched to get them, and no
+    # paid service is called.
     credit = creator_credit(selected)
+    local_facts = _local_caption_facts(Path(temp_path), metadata, selected)
+    if local_facts:
+        metadata["local_facts"] = local_facts
+        measured = ", ".join(
+            str(part)
+            for part in (
+                ", ".join(
+                    f"{key} {value}"
+                    for key, value in (local_facts.get("sound") or {}).items()
+                    if key not in ("measured",)
+                ),
+                f"hình đọc được bởi mô hình"
+                if (local_facts.get("vision") or {}).get("reading", {}).get("from_model")
+                else "",
+            )
+            if part
+        )
+        log(f"local facts: {measured or 'có đặc trưng đo được'}")
     analysis = analyze_content(metadata, config, creator_credit=credit)
     log(
         f"state: analysed {selected.creator} -> decision: USE content caption | "

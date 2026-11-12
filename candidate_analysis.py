@@ -217,6 +217,11 @@ class CandidateAnalysis:
     # content. The caption never sets this; only the judged frames do.
     content_relevant: bool | None = None
     content_relevance_reason: str = ""
+    # What the local vision analyzer really saw in the frames, and what it
+    # measured. The two are kept apart inside it.
+    local_vision: dict[str, Any] = field(default_factory=dict)
+    # What the machine is missing to measure the sound, when it is.
+    local_audio_dependency_missing: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -930,6 +935,12 @@ def analyze_candidate(
         insufficient_reason=insufficient_reason,
         content_relevant=content_relevant,
         content_relevance_reason=content_relevance_reason,
+        # What the local analyzer saw and measured. It travels with the
+        # candidate, so the dashboard can show it without asking again.
+        local_vision=dict(payload.get("local_vision") or {}),
+        local_audio_dependency_missing=str(
+            payload.get("local_audio_dependency_missing") or ""
+        ),
     )
 
 

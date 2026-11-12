@@ -115,7 +115,11 @@ class TemplateProvider:
     ) -> dict[str, Any]:
         """Build a caption, hashtags, and rule-based score without any API call."""
         source_name = _source_name(metadata)
-        caption = f"{source_name} - {self.topic}".strip()
+        # The facts the local analyzers really measured come first, so
+        # the caption describes the video that was measured. When nothing
+        # was measured, the caption is the topic and the title.
+        measured = measured_content_facts(metadata)
+        caption = " - ".join(part for part in (measured, source_name, self.topic) if part).strip()
         if len(caption) > MAX_CAPTION_LENGTH:
             caption = caption[:MAX_CAPTION_LENGTH].rstrip()
         hashtags = self.hashtags[:MAX_HASHTAGS]
@@ -249,6 +253,11 @@ def build_content_caption(
     The caption describes the detected topic rather than a generic template,
     and it always keeps the creator credit so the origin of the content is
     never hidden. No watermark or provenance marker is removed.
+
+    When the local analyzers measured something about the video, the
+    caption says what was really measured. A fact that was not measured
+    is never written down, so the caption never claims a mood, a genre or
+    a lyric that the machine did not read.
     """
     source_name = _source_name(metadata)
     descriptors = {
@@ -261,13 +270,76 @@ def build_content_caption(
         "fitness": "fitness",
     }
     descriptor = descriptors.get(topic.strip().lower(), topic.strip() or DEFAULT_TOPIC)
-    parts = [f"{source_name}", descriptor]
+
+    # The facts that the local analyzers really measured are used when
+    # they are there. They come first, because they say what the video
+    # really shows, and the title follows.
+    parts: list[str] = []
+    measured = measured_content_facts(metadata)
+    if measured:
+        parts.append(measured)
+    parts.append(source_name)
+    parts.append(descriptor)
     text = " - ".join(part for part in parts if part).strip()
     if creator_credit:
         text = f"{text} - {creator_credit}"
     if len(text) > MAX_CAPTION_LENGTH:
         text = text[:MAX_CAPTION_LENGTH].rstrip()
     return text
+
+
+def measured_content_facts(metadata: dict[str, Any]) -> str:
+    """Return one short phrase that says what was really measured.
+
+    The phrase only names a fact that the local analyzers measured on
+    this machine. When nothing was measured, the phrase is empty and
+    the caption falls back to the topic and the title.
+    """
+    facts = metadata.get("local_facts")
+    if not isinstance(facts, dict):
+        return ""
+
+    pieces: list[str] = []
+
+    # The sound, when the track was really decoded.
+    sound = facts.get("sound")
+    if isinstance(sound, dict) and sound.get("measured"):
+        tempo = sound.get("tempo_bpm")
+        loudness = sound.get("loudness_db")
+        duration = sound.get("duration_seconds")
+        if isinstance(tempo, (int, float)) and float(tempo) > 0:
+            pieces.append(f"nhịp {int(round(float(tempo)))} BPM")
+        if isinstance(loudness, (int, float)):
+            pieces.append(f"âm lượng {int(round(float(loudness)))} dB")
+        if isinstance(duration, (int, float)) and float(duration) > 0:
+            pieces.append(f"dài {int(round(float(duration)))} giây")
+
+    # The picture, when the frames were really read.
+    vision = facts.get("vision")
+    if isinstance(vision, dict):
+        reading = vision.get("reading") if isinstance(vision.get("reading"), dict) else {}
+        # The objects and the scene are only named when the reading came
+        # from the model. A reading that was never confirmed by the
+        # model stays out of the caption.
+        if reading.get("from_model"):
+            seen = reading.get("objects") if isinstance(reading.get("objects"), list) else []
+            names: list[str] = []
+            for item in seen:
+                if isinstance(item, dict) and str(item.get("label") or "").strip():
+                    names.append(str(item["label"]).strip())
+                if len(names) >= 2:
+                    break
+            if names:
+                pieces.append("hình có " + ", ".join(names))
+            elif str(reading.get("scene") or "").strip():
+                pieces.append("hình: " + str(reading["scene"]).strip())
+        ui = vision.get("production_ui") if isinstance(vision.get("production_ui"), dict) else {}
+        if isinstance(ui.get("score"), (int, float)) and float(ui.get("score") or 0) >= 0.45:
+            pieces.append("giao diện làm nhạc")
+
+    if not pieces:
+        return ""
+    return ", ".join(pieces)
 
 
 def analyze_content(

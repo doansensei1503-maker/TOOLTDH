@@ -55,6 +55,55 @@ function num(value) {
   return n.toLocaleString("en-US");
 }
 
+// The line that says what the local vision analyzer really saw. It
+// names the model when a model read the picture, says the certainty of
+// the reading, and says plainly when the machine could not read the
+// text in the picture. It never claims more than what was measured.
+function visionLine(a) {
+  const v = a && a.local_vision;
+  if (!v || typeof v !== "object") return "";
+  const bits = [];
+
+  const reading = v.reading || {};
+  if (reading.from_model && reading.model) {
+    const seen = [];
+    if (reading.scene) seen.push(reading.scene);
+    (reading.objects || []).slice(0, 3).forEach((o) => {
+      if (o && o.label) seen.push(o.label + " " + Math.round((o.confidence || 0) * 100) + "%");
+    });
+    bits.push(
+      "Mô hình vision " + reading.model + ": " + (seen.length ? seen.join(", ") : "không mô tả") +
+      (reading.frames_read ? " (" + reading.frames_read + " khung hình)" : "")
+    );
+    if (reading.can_tell_ai_origin === false) {
+      bits.push("mô hình chỉ đặt tên được nội dung, chưa chứng minh được nguồn gốc AI");
+    }
+  } else {
+    bits.push("Chưa có mô hình vision trên máy — chỉ đo được đặc trưng hình ảnh");
+  }
+
+  const ui = v.production_ui || {};
+  if (ui.score) {
+    bits.push("giao diện sản xuất nhạc " + Math.round(ui.score * 100) + "%");
+  }
+
+  const motion = v.motion || {};
+  if (motion.frames_used >= 2) {
+    bits.push("hình thay đổi " + Math.round((motion.change || 0) * 100) + "%, nhất quán " + Math.round((motion.consistency || 0) * 100) + "%");
+  }
+
+  if (v.ocr_available === false && v.ocr_missing) {
+    bits.push("Chưa đọc được chữ trong hình (thiếu runtime OCR)");
+  }
+
+  if (v.missing_dependency) {
+    bits.push(v.missing_dependency);
+  }
+
+  if (!bits.length) return "";
+  return "<div class='muted' style='margin-top:4px'>" + esc(bits.join(" · ")) + "</div>";
+}
+
 /** A metric the source did not publish is shown as "Không có dữ liệu", never as 0. */
 function metric(value, known) {
   if (known === false) return '<span class="muted" title="Nguồn không cung cấp chỉ số này">Không có dữ liệu</span>';
@@ -374,6 +423,7 @@ function renderAnalysis() {
         "Nội dung thật: " + (a.content_analyzed ? "đã phân tích " + (a.frame_count || 0) + " khung hình" : "chưa đọc được") +
         (a.provider ? " · " + esc(a.provider) : "") +
       "</div>" +
+      visionLine(a) +
       "<table class='table'><thead><tr><th>Tiêu chí</th><th>Điểm</th><th>Lý do</th></tr></thead><tbody>" +
         dims + "</tbody></table>" +
       (strengths ? "<div><strong>Điểm mạnh</strong><ul>" + strengths + "</ul></div>" : "") +

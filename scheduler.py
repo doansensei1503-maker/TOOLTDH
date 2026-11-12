@@ -244,6 +244,50 @@ def run_scheduled_task(
     return status
 
 
+def run_retention_pass(
+    config: dict[str, Any] | None = None,
+    *,
+    log: Callable[[str], None] = print,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Remove the copies of the videos whose seven days have passed.
+
+    The pass only removes the copies of a video whose publish was really
+    confirmed and whose seven days have run out. The original, the
+    history, the record of the rights and the post on the platform stay.
+
+    The result is written to the state file of the scheduler, so a
+    restart of the machine does not lose the record of what was done.
+    """
+    from storage import cleanup_expired_media
+
+    settings = dict(config or {})
+    retention_days = int(settings.get("retention_days", 7) or 7)
+    result = cleanup_expired_media(
+        retention_days=retention_days,
+        dry_run=dry_run,
+        log=log,
+    )
+
+    state = load_schedule_state()
+    state.setdefault("retention_runs", []).append({
+        "at": result["at"],
+        "dry_run": bool(result["dry_run"]),
+        "expired_tasks": [item["task_id"] for item in result["expired_tasks"]],
+        "removed": list(result["removed"]),
+        "skipped": list(result["skipped"]),
+    })
+    # The record of the passes is kept short, so the state file does not
+    # grow without end.
+    state["retention_runs"] = state["retention_runs"][-30:]
+    save_schedule_state(state)
+    log(
+        f"retention: {len(result['removed'])} file(s) removed, "
+        f"{len(result['skipped'])} kept, dry_run={result['dry_run']}"
+    )
+    return result
+
+
 def build_scheduler(
     config: dict[str, Any],
     *,
@@ -254,6 +298,10 @@ def build_scheduler(
 
     The job is created with the configured daily time. Nothing is published
     by the job.
+
+    A second job removes the copies of the videos whose seven days have
+    passed. It runs once a day and it never removes anything that was
+    not really published.
     """
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
@@ -293,6 +341,21 @@ def build_scheduler(
         coalesce=True,
         replace_existing=True,
     )
+
+    # The retention pass runs once a day, a little after the discovery. It
+    # removes the copies of the videos whose seven days have passed and
+    # never removes anything that was not really published.
+    retention_trigger = CronTrigger(hour=hour, minute=(minute + 30) % 60)
+    scheduler.add_job(
+        run_retention_pass,
+        trigger=retention_trigger,
+        id="toolt-dh-retention",
+        args=[config],
+        kwargs={"log": log},
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
     return scheduler
 
 
@@ -323,8 +386,9 @@ __all__ = [
     "SchedulerError",
     "build_scheduler",
     "load_schedule_state",
-    "parse_daily_time",
-    "run_scheduled_task",
+  "parse_daily_time",
+  "run_retention_pass",
+  "run_scheduled_task",
     "save_schedule_state",
     "start_scheduler",
 ]

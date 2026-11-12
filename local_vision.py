@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import io
 import os
+import shutil
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -67,6 +68,12 @@ class VisionReading:
     Every field here comes from the model. The fields the model could
     not fill stay empty, and the reading says so with its own
     ``certainty``.
+
+    The ``kind`` of the model matters as much as what it says. A model
+    that only knows how to name what is in a picture proves that the
+    thing is in the picture. It does not prove that a video was made
+    with a machine. Only a model that was trained to tell how the
+    content was made can settle that question.
     """
 
     # The scene the model described, in its own words.
@@ -81,6 +88,13 @@ class VisionReading:
     from_model: bool = False
     # How sure the model was about the scene as a whole.
     confidence: float = 0.0
+    # What the model can tell: "objects", "ai_origin" or "both".
+    # A model of names alone cannot say how the content was made.
+    kind: str = "objects"
+    # The frame the reading came from, as a share of the video.
+    frame_index: int = 0
+    # The number of frames the model really looked at.
+    frames_read: int = 0
     # Why the reading is empty, when it is empty.
     note: str = ""
 
@@ -95,6 +109,16 @@ class VisionReading:
             return EVIDENCE
         return NO_DATA
 
+    @property
+    def can_tell_ai_origin(self) -> bool:
+        """Return True when this model can say how the content was made.
+
+        A model that only names what is in a picture cannot say that
+        the picture was made with a machine. Only a model that was
+        trained for that can.
+        """
+        return self.from_model and self.kind in ("ai_origin", "both")
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "scene": self.scene,
@@ -103,6 +127,10 @@ class VisionReading:
             "model": self.model,
             "from_model": self.from_model,
             "confidence": round(float(self.confidence), 3),
+            "kind": self.kind,
+            "can_tell_ai_origin": self.can_tell_ai_origin,
+            "frame_index": int(self.frame_index),
+            "frames_read": int(self.frames_read),
             "certainty": self.certainty,
             "note": self.note,
         }
@@ -189,6 +217,12 @@ class VisionReport:
     motion: VisionMotion = field(default_factory=VisionMotion)
     # The pull of the opening.
     hook: VisionHook = field(default_factory=VisionHook)
+    # What the pixels say about a music production screen.
+    production_ui: dict[str, Any] = field(default_factory=dict)
+    # Whether this machine can read the text in a picture.
+    ocr_available: bool = False
+    # What is missing to read the text, when it is missing.
+    ocr_missing: str = ""
     # The name of the model that was used, when one was used.
     model: str = ""
     # True when a model really looked at the frames.
@@ -196,7 +230,7 @@ class VisionReport:
     # What the machine is missing to understand the picture.
     missing_dependency: str = ""
     # The version of the analyzer, part of the cache key.
-    version: str = "vision-v1"
+    version: str = "vision-v2"
 
     @property
     def certainty(self) -> str:
@@ -217,6 +251,9 @@ class VisionReport:
             "reading": self.reading.to_dict(),
             "motion": self.motion.to_dict(),
             "hook": self.hook.to_dict(),
+            "production_ui": dict(self.production_ui),
+            "ocr_available": self.ocr_available,
+            "ocr_missing": self.ocr_missing,
             "model": self.model,
             "model_used": self.model_used,
             "missing_dependency": self.missing_dependency,
@@ -260,7 +297,12 @@ def clear_vision_adapters() -> None:
 
 # The name of the model that reads the picture. It is part of the cache,
 # so a different model makes the old readings stale.
-VISION_MODEL_VERSION = "vision-v1"
+#
+# The version moved to v2 when the analyzer learned to tell the screen
+# of a music tool from a plain picture, and when the kind of the model
+# became known, so a model that only names things is not taken for a
+# model that can say how the content was made.
+VISION_MODEL_VERSION = "vision-v2"
 
 # The labels the model knows, when the model carries its own label file.
 # The labels of an ImageNet model are read from a text file next to it.
@@ -359,32 +401,52 @@ def onnx_vision_adapter(model_path: str, *, top_k: int = 5) -> Any:
         rows = np.asarray(outputs)
         if rows.ndim == 1:
             rows = rows.reshape(1, -1)
-        best_row = rows[0].astype(np.float64)
+        # A model that was fed one picture at a time gives one row of
+        # scores for each picture, and each row may carry the shape of
+        # the batch the model uses. The scores of one picture are always
+        # the last two dimensions, so the row is made flat here.
+        if rows.ndim > 2:
+            rows = rows.reshape(rows.shape[0], -1)
 
-        # The scores of a model are often not shares yet. They are
-        # turned into shares here, so the number that is reported says
-        # how sure the model really was.
-        if float(np.max(best_row) - np.min(best_row)) > 30.0:
-            shifted = best_row - float(np.max(best_row))
-            weights = np.exp(shifted)
-        elif float(np.min(best_row)) < 0.0:
-            shifted = best_row - float(np.max(best_row))
-            weights = np.exp(shifted)
-        else:
-            total = float(best_row.sum())
-            weights = best_row / total if total > 1e-9 else np.ones_like(best_row)
+        # Every frame that was read is taken into account, so the
+        # reading describes the whole video and not only its first
+        # frame.
+        shares = []
+        for row in rows:
+            row = row.astype(np.float64)
+            # The scores of a model are often not shares yet. They are
+            # turned into shares here, so the number that is reported
+            # says how sure the model really was.
+            if float(np.max(row) - np.min(row)) > 30.0 or float(np.min(row)) < 0.0:
+                shifted = row - float(np.max(row))
+                weights = np.exp(shifted)
+            else:
+                total = float(row.sum())
+                weights = row / total if total > 1e-9 else np.ones_like(row)
+            shares.append(weights)
+        mean_weights = np.mean(shares, axis=0)
 
-        order = np.argsort(weights)[::-1][:top_k]
+        order = np.argsort(mean_weights)[::-1][:top_k]
         objects: list[dict[str, Any]] = []
         for index in order:
             position = int(index)
-            score = float(weights[position])
+            score = float(mean_weights[position])
             label = (
                 labels[position].split(" ", 1)[-1].replace("_", " ")
                 if position < len(labels)
                 else f"lớp {position}"
             )
             objects.append({"label": label, "confidence": round(score, 4)})
+
+        # The frame the reading came from: the one the model was most
+        # sure about.
+        best_frame = 0
+        best_score = -1.0
+        for number, row in enumerate(shares):
+            top = float(np.max(row))
+            if top > best_score:
+                best_score = top
+                best_frame = number
 
         # The scene is the strongest reading of the model, joined with
         # the things it saw.
@@ -401,6 +463,12 @@ def onnx_vision_adapter(model_path: str, *, top_k: int = 5) -> Any:
             "model": os.path.basename(path),
             "from_model": True,
             "confidence": confidence,
+            # A model that only knows how to name what is in a picture
+            # cannot say how the content was made. It says what it saw,
+            # and nothing more.
+            "kind": "objects",
+            "frame_index": best_frame,
+            "frames_read": len(rows),
             "note": note,
         }
 
@@ -669,6 +737,17 @@ def reading_from_dict(payload: dict[str, Any]) -> VisionReading:
             )
         )
     text = [str(item) for item in (payload.get("text") or []) if str(item).strip()]
+    kind = str(payload.get("kind") or "objects").strip().lower()
+    if kind not in ("objects", "ai_origin", "both"):
+        kind = "objects"
+    try:
+        frame_index = int(payload.get("frame_index") or 0)
+    except (TypeError, ValueError):
+        frame_index = 0
+    try:
+        frames_read = int(payload.get("frames_read") or 0)
+    except (TypeError, ValueError):
+        frames_read = 0
     return VisionReading(
         scene=str(payload.get("scene") or ""),
         objects=objects,
@@ -676,6 +755,9 @@ def reading_from_dict(payload: dict[str, Any]) -> VisionReading:
         model=str(payload.get("model") or ""),
         from_model=bool(payload.get("from_model") or False),
         confidence=float(payload.get("confidence") or 0.0),
+        kind=kind,
+        frame_index=frame_index,
+        frames_read=frames_read,
         note=str(payload.get("note") or ""),
     )
 
@@ -1037,6 +1119,183 @@ def measure_hook(frames: list[bytes]) -> VisionHook:
     )
 
 
+def ocr_available() -> tuple[bool, str]:
+    """Return whether this machine can read the text in a picture.
+
+    The check looks for the runtimes that read text on this machine. The
+    one that is checked is the one that is really there; nothing is
+    installed here.
+
+    The second value of the pair says what is missing, so the reason a
+    text could not be read is never a mystery.
+    """
+    import importlib.util
+
+    # The runtimes that read text on this machine, in the order they are
+    # preferred.
+    options = (
+        ("rapidocr_onnxruntime", "RapidOCR"),
+        ("easyocr", "EasyOCR"),
+        ("paddleocr", "PaddleOCR"),
+        ("pytesseract", "Tesseract"),
+    )
+    for module, name in options:
+        try:
+            if importlib.util.find_spec(module) is not None:
+                return True, name
+        except Exception:
+            continue
+
+    # The text may also be read by a binary of the machine, without any
+    # library at all.
+    for binary in ("tesseract",):
+        if shutil.which(binary):
+            return True, "Tesseract"
+
+    # The other interpreters of the machine may carry a runtime that this
+    # one cannot see.
+    for path in _other_interpreters():
+        if not path:
+            continue
+        try:
+            import subprocess
+
+            result = subprocess.run(
+                [
+                    path,
+                    "-c",
+                    "import importlib.util as u; "
+                    "print([m for m in ('rapidocr_onnxruntime','easyocr','paddleocr','pytesseract') "
+                    "if u.find_spec(m)])",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result.returncode != 0:
+                continue
+            names = (result.stdout or "").strip()
+            if names and names not in ("[]", ""):
+                return True, names
+        except Exception:
+            continue
+
+    return False, (
+        "máy chưa có runtime đọc chữ trong hình (OCR); chưa đọc được chữ nào "
+        "trong khung hình"
+    )
+
+
+def measure_production_ui(frames: list[bytes]) -> dict[str, Any]:
+    """Look for the structure of a music production screen in the frames.
+
+    A music editor shows a waveform, a timeline and panels of text. The
+    measure looks for those shapes in the real pixels: a band of strong
+    vertical strokes that sits in the middle of the picture, and text
+    like rows above and below it.
+
+    The measure says the picture looks like a music screen. It is not a
+    model, so it stays a possibility and never becomes evidence.
+    """
+    import numpy as np
+
+    result: dict[str, Any] = {
+        "score": 0.0,
+        "waveform": 0.0,
+        "timeline": 0.0,
+        "panels": 0.0,
+        "frames_with_ui": 0,
+        "frames_used": 0,
+        "certainty": NO_DATA,
+        "note": "",
+    }
+
+    pictures = []
+    for frame in frames:
+        picture = _read_picture(frame)
+        if picture is not None:
+            pictures.append(picture)
+    if not pictures:
+        result["note"] = "không đọc được ảnh của khung hình"
+        return result
+
+    scores: list[float] = []
+    waveforms: list[float] = []
+    timelines: list[float] = []
+    panels: list[float] = []
+
+    for picture in pictures:
+        try:
+            gray = (
+                0.299 * picture[:, :, 0]
+                + 0.587 * picture[:, :, 1]
+                + 0.114 * picture[:, :, 2]
+            )
+            height, width = gray.shape
+            if height < 20 or width < 20:
+                continue
+
+            # The waveform: a band of strong vertical strokes that sits
+            # around the middle of the picture, where a track lives.
+            dx = np.abs(np.diff(gray, axis=1))
+            rows = (dx > 18).mean(axis=1)
+            middle = rows[int(height * 0.30):int(height * 0.70)]
+            waveform = float(middle.mean()) if middle.size else 0.0
+
+            # The timeline: strong vertical strokes that reach through
+            # many rows, which is what a playhead and the beats of a
+            # grid look like.
+            tall = (dx > 22).sum(axis=1)
+            timeline = float((tall > height * 0.35).mean()) if height else 0.0
+
+            # The panels: rows of short strokes, which is what the text
+            # of a panel looks like.
+            dy = np.abs(np.diff(gray, axis=0))
+            top = (dy > 16).mean(axis=1)[: int(height * 0.28)]
+            bottom = (dy > 16).mean(axis=1)[int(height * 0.72):]
+            panels = float(max(top.mean() if top.size else 0.0,
+                               bottom.mean() if bottom.size else 0.0))
+
+            waveforms.append(min(1.0, waveform * 6.0))
+            timelines.append(min(1.0, timeline * 4.0))
+            panels.append(min(1.0, panels * 5.0))
+        except Exception:
+            continue
+
+    if not waveforms:
+        result["note"] = "không đo được cấu trúc hình ảnh"
+        return result
+
+    waveform = float(np.mean(waveforms))
+    timeline = float(np.mean(timelines))
+    panel = float(np.mean(panels))
+
+    # The screen of a music tool carries a waveform. The panels of text
+    # are a second sign, and the timeline is a third. A strong waveform
+    # on its own is already a sign worth reporting.
+    score = min(1.0, waveform * 0.55 + panel * 0.25 + timeline * 0.20)
+    if waveform < 0.12:
+        # Without the shape of a waveform, this is not the screen of a
+        # music tool, whatever else it shows.
+        score = min(score, 0.30)
+    elif panel < 0.06 and timeline < 0.20:
+        # The waveform is there but nothing else of a music tool is.
+        # The sign is real, but it is a weak one.
+        score = min(score, 0.55)
+
+    result.update({
+        "score": round(score, 4),
+        "waveform": round(waveform, 4),
+        "timeline": round(timeline, 4),
+        "panels": round(panel, 4),
+        "frames_used": len(waveforms),
+        "frames_with_ui": sum(1 for value in waveforms if value >= 0.12),
+        # A measure of the pixels is a sign, never proof.
+        "certainty": POSSIBILITY,
+    })
+    return result
+
+
 # --------------------------------------------------------------------------
 # The analyzer.
 # --------------------------------------------------------------------------
@@ -1067,6 +1326,15 @@ def analyze_vision(
     # ---- the pixel layer ------------------------------------------------
     report.motion = measure_motion(frames)
     report.hook = measure_hook(frames)
+    report.production_ui = measure_production_ui(frames)
+
+    # ---- the text -------------------------------------------------------
+    # The machine is told whether it can read the text in a picture, so
+    # the reason a text is missing is never a mystery.
+    has_ocr, ocr_note = ocr_available()
+    report.ocr_available = has_ocr
+    report.ocr_missing = "" if has_ocr else ocr_note
+
     report.missing_dependency = (
         "" if report.model_used else vision_dependency_missing()
     )
@@ -1108,4 +1376,13 @@ def describe_vision(report: VisionReport) -> str:
             f"phần mở đầu dài {report.hook.frames_used} khung hình, "
             f"chuyển động {report.hook.movement:.1%}"
         )
+    ui = report.production_ui or {}
+    if float(ui.get("score") or 0.0) >= 0.35:
+        parts.append(
+            f"hình giống giao diện sản xuất nhạc {float(ui.get('score') or 0):.0%} "
+            f"(waveform {float(ui.get('waveform') or 0):.0%}, "
+            f"dải thời gian {float(ui.get('timeline') or 0):.0%})"
+        )
+    if not report.ocr_available and report.ocr_missing:
+        parts.append("chưa đọc được chữ trong khung hình")
     return "; ".join(parts) if parts else "Không mô tả được nội dung hình ảnh."

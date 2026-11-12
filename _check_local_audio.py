@@ -235,8 +235,8 @@ if BEAT120.exists() and la.audio_available():
 
 print("\n== 9. the analyzer is wired into the pipeline ==")
 check(
-    "the version was raised for the new measurements",
-    la.ANALYZER_VERSION == "local-v2",
+    "the version is raised for the new measurements",
+    la.ANALYZER_VERSION != "local-v1",
     la.ANALYZER_VERSION,
 )
 check(

@@ -2074,6 +2074,87 @@ def current_draft_reference(page: Any) -> str:
     return url
 
 
+# The shape of the address of a published post. The number after
+# ``/video/`` is the id the platform gave the post.
+PUBLISHED_URL_PATTERN = re.compile(r"https://[^\s/]+/(@[^\s/]+/)?video/(\d+)", re.I)
+
+
+def published_post_reference(page: Any) -> str:
+    """Return the address of the post that was really published.
+
+    The page is read for the address of a post that the platform
+    confirms. The link of the post that was published is looked for in
+    the page itself, and the address of the page is used when it already
+    carries the number of a post.
+
+    The empty string is returned when nothing confirms that the post
+    went through. The caller must then treat the publish as unknown and
+    must not write PUBLISHED.
+    """
+    # The address of the page, when it already is the address of a post.
+    try:
+        current = str(page.url)
+    except Exception:
+        current = ""
+    match = PUBLISHED_URL_PATTERN.search(current)
+    if match:
+        return match.group(0)
+
+    # The links of the page. Only the ones that carry the number of a
+    # post are real posts, and not the address of the studio itself.
+    try:
+        links = page.get_by_role("link")
+        count = int(links.count())
+    except Exception:
+        count = 0
+    for index in range(min(count, 60)):
+        try:
+            href = str(links.nth(index).get_attribute("href") or "")
+        except Exception:
+            continue
+        match = PUBLISHED_URL_PATTERN.search(href)
+        if match:
+            return match.group(0)
+
+    # The text of the page, which sometimes carries the address of the
+    # post that was just published.
+    try:
+        text = page_text(page)
+    except Exception:
+        text = ""
+    match = PUBLISHED_URL_PATTERN.search(text or "")
+    if match:
+        return match.group(0)
+    return ""
+
+
+def wait_for_published_reference(
+    page: Any,
+    *,
+    timeout_ms: int = 20000,
+    poll_ms: int = 1000,
+    sleep: Any = None,
+) -> str:
+    """Wait for the page to show the post that was published.
+
+    The address of the published post is looked for until it shows up or
+    the time runs out. The empty string is returned when nothing
+    confirms the publish, so the caller never writes PUBLISHED on a
+    guess.
+    """
+    import time as _time
+
+    pause = sleep if sleep is not None else _time.sleep
+    waited = 0
+    while waited <= timeout_ms:
+        reference = published_post_reference(page)
+        if reference:
+            return reference
+        pause(poll_ms / 1000.0)
+        waited += poll_ms
+    return ""
+
+
 def capture_error_screenshot(page: Any, path: Path) -> str | None:
     """Capture an error screenshot for AI review."""
     try:
@@ -2377,6 +2458,39 @@ def post_to_tiktok_studio(
         previous = load_task_state(state_path)
         previous_status = str(previous.get("status", ""))
         previous_draft = str(previous.get("draft_reference", ""))
+        if previous_status == "PUBLISHED":
+            # The post already went out. The run never publishes a second
+            # time, so a retry or a resume cannot double post.
+            posted = str(previous.get("posted_url", "") or "").strip()
+            session.transition(
+                STATE_RESUMING_TASK,
+                "SKIP publish",
+                "the task was already published so the post is not repeated",
+            )
+            log(
+                f"RESUME: task {task_id} was already published "
+                f"({posted or 'the address was not recorded'}); the post is not repeated."
+            )
+            state = save_task_state(
+                task_id,
+                "PUBLISHED",
+                str(previous.get("caption", caption)) or caption,
+                str(previous.get("video_path", video_path)) or str(video_path),
+                "Resumed an already published task; the post was not repeated.",
+                state_path,
+                {"mode": mode, "posted_url": posted},
+            )
+            return PosterResult(
+                task_id=task_id,
+                status="PUBLISHED",
+                caption=str(previous.get("caption", caption)) or caption,
+                video_path=str(previous.get("video_path", video_path)) or str(video_path),
+                message=(
+                    "Resumed an already published task; the post was not repeated. "
+                    f"Reference: {posted or 'the address was not recorded'}"
+                ),
+                state=state,
+            )
         if previous_status == "DRAFT_SAVED" and previous_draft:
             session.transition(
                 STATE_RESUMING_TASK,
@@ -2734,6 +2848,36 @@ def post_to_tiktok_studio(
             if not handle_block(blocked):
                 return blocked_result(blocked)
             delay(random_source(3.0, 8.0))
+
+        # The publish is only PUBLISHED when the platform confirms it. The
+        # address of the post that was published is looked for in the
+        # page, and when nothing confirms it the run ends as unknown
+        # instead of claiming a publish that did not happen.
+        posted_reference = wait_for_published_reference(page)
+        if not posted_reference:
+            reason = (
+                "The publish button was pressed, but the platform did not show "
+                "the post, so the publish is not confirmed."
+            )
+            log(f"NOT CONFIRMED: {reason}")
+            state = save_task_state(
+                task_id,
+                "FAILED_RETRYABLE",
+                caption,
+                str(video_path),
+                reason,
+                state_path,
+                {"mode": mode},
+            )
+            return PosterResult(
+                task_id=task_id,
+                status="FAILED_RETRYABLE",
+                caption=caption,
+                video_path=str(video_path),
+                message=reason,
+                state=state,
+            )
+
         session.transition(
             STATE_AWAITING_APPROVAL,
             "PUBLISH",
@@ -2746,14 +2890,14 @@ def post_to_tiktok_studio(
             str(video_path),
             "Published through the official TikTok Studio UI.",
             state_path,
-            {"mode": mode},
+            {"mode": mode, "posted_url": posted_reference},
         )
         return PosterResult(
             task_id=task_id,
             status="PUBLISHED",
             caption=caption,
             video_path=str(video_path),
-            message="Published through the official TikTok Studio UI.",
+            message=f"Published through the official TikTok Studio UI. {posted_reference}",
             state=state,
         )
     except Exception as exc:

@@ -17,6 +17,9 @@ TEMP_DIR = DATA_DIR / "temp"
 LIBRARY_FILE = DATA_DIR / "library.json"
 SCREENSHOTS_DIR = DATA_DIR / "screenshots"
 TASK_STATES_DIR = DATA_DIR / "tasks"
+# The record of what was published. It is the proof of what was posted,
+# so the retention pass never touches it.
+HISTORY_FILE = DATA_DIR / "history.json"
 
 SUPPORTED_FORMATS = {".mp4", ".mov", ".webm"}
 MAX_FILE_SIZE_BYTES = 4 * 1024 * 1024 * 1024
@@ -189,6 +192,175 @@ def cleanup_task(
         "temp": removed_temp,
         "screenshots": removed_screenshots,
     }
+
+
+# The number of days a published video and the files that belong to it are
+# kept before the retention pass may remove them.
+RETENTION_DAYS = 7
+
+
+def _parse_published_at(value: Any) -> datetime | None:
+    """Return the moment a post was published, when it can be read."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def expired_published_tasks(
+    now: datetime | None = None,
+    *,
+    history_path: Path = HISTORY_FILE,
+    retention_days: int = RETENTION_DAYS,
+) -> list[dict[str, Any]]:
+    """Return the published tasks whose retention time has run out.
+
+    The deadline is the moment the post was published plus the number of
+    days that are kept. A task that was never published, or whose
+    published moment cannot be read, is never expired: the machine does
+    not guess a deadline it cannot know.
+
+    Only the tasks that carry a real published moment and a real posted
+    address are returned, so a post on the platform and its record are
+    never touched.
+    """
+    moment = now or datetime.now()
+    try:
+        with Path(history_path).open("r", encoding="utf-8") as history_file:
+            entries = json.load(history_file)
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(entries, list):
+        return []
+
+    expired: list[dict[str, Any]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("status") or "").strip().upper() != "PUBLISHED":
+            continue
+        posted_url = str(entry.get("posted_url") or "").strip()
+        if not posted_url:
+            # A publish that was never confirmed is not a published post.
+            continue
+        published_at = _parse_published_at(entry.get("date"))
+        if published_at is None:
+            continue
+        deadline = published_at.timestamp() + retention_days * 24 * 60 * 60
+        if moment.timestamp() < deadline:
+            continue
+        expired.append({
+            "task_id": str(entry.get("task_id") or ""),
+            "posted_url": posted_url,
+            "published_at": published_at.isoformat(),
+            "deadline": published_at.isoformat(),
+        })
+    return expired
+
+
+def cleanup_expired_media(
+    now: datetime | None = None,
+    *,
+    history_path: Path = HISTORY_FILE,
+    task_states_dir: Path = TASK_STATES_DIR,
+    temp_dir: Path = TEMP_DIR,
+    originals_dir: Path = ORIGINALS_DIR,
+    processed_dir: Path = PROCESSED_DIR,
+    retention_days: int = RETENTION_DAYS,
+    dry_run: bool = False,
+    log: Any = print,
+) -> dict[str, Any]:
+    """Remove the copies of the videos whose retention time has run out.
+
+    Only the files that belong to a task whose publish was confirmed and
+    whose seven days have passed are removed. The original of the video,
+    the history, the record of the rights and the post on the platform
+    are never touched: they are the proof of what was published and they
+    stay.
+
+    A file that another task still uses is never removed, and a file of a
+    task that was never published is never removed either.
+
+    The pass is written to the state file of the scheduler, so a restart
+    of the machine does not lose the record of what was done.
+    """
+    moment = now or datetime.now()
+    expired = expired_published_tasks(
+        moment,
+        history_path=history_path,
+        retention_days=retention_days,
+    )
+    expired_task_ids = {item["task_id"] for item in expired if item["task_id"]}
+
+    # The files that other tasks still use are never removed.
+    busy: set[Path] = set()
+    for state_file in sorted(Path(task_states_dir).glob("*.json")):
+        try:
+            payload = json.loads(state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        owner = str(payload.get("task_id") or state_file.stem)
+        if owner in expired_task_ids:
+            continue
+        for key in ("temp_path", "original_path", "path"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                busy.add(Path(value).resolve())
+
+    removed: list[str] = []
+    kept: list[str] = []
+    skipped: list[str] = []
+
+    for task_id in sorted(expired_task_ids):
+        state = load_task_state(task_id, task_states_dir)
+        # Only a task whose publish was really confirmed may be cleaned.
+        status = str(state.get("status") or "").strip().upper()
+        posted = str(state.get("posted_url") or state.get("draft_reference") or "").strip()
+        if status != "PUBLISHED" or not posted:
+            skipped.append(f"{task_id}: chưa xác minh đăng, giữ lại")
+            continue
+
+        for key in ("temp_path", "path"):
+            candidate = str(state.get(key) or "").strip()
+            if not candidate:
+                continue
+            path = Path(candidate)
+            if not path.is_file():
+                continue
+            resolved = path.resolve()
+            # The original is the proof of what was published and stays.
+            try:
+                if resolved == Path(originals_dir).resolve():
+                    skipped.append(f"{task_id}: bản gốc, giữ lại")
+                    continue
+            except OSError:
+                continue
+            if resolved in busy:
+                skipped.append(f"{task_id}: đang dùng bởi job khác, giữ lại")
+                continue
+            if dry_run:
+                removed.append(str(path))
+                continue
+            try:
+                path.unlink()
+                removed.append(str(path))
+                log(f"cleanup: removed {path}")
+            except OSError as exc:
+                skipped.append(f"{task_id}: {exc}")
+
+    result = {
+        "dry_run": bool(dry_run),
+        "expired_tasks": expired,
+        "removed": removed,
+        "skipped": skipped,
+        "at": moment.isoformat(),
+    }
+    return result
 
 
 def load_task_state(task_id: str, tasks_dir: Path = TASK_STATES_DIR) -> dict[str, Any]:

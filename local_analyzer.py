@@ -61,7 +61,13 @@ def vision_model_path() -> str:
 # The version of the analyzer. It is part of the cache key, so a new
 # version of the analyzer makes the old results stale instead of mixing
 # two different sets of numbers.
-ANALYZER_VERSION = "local-v2"
+#
+# The version moved to v3 when the vision analyzer learned to tell the
+# screen of a music tool from a plain picture, and when a model that
+# only names things stopped being taken for a model that can say how
+# the content was made. Both change the numbers, so the old results
+# must not be mixed with the new ones.
+ANALYZER_VERSION = "local-v3"
 
 # The label the dashboard shows when the machine cannot decide.
 INSUFFICIENT_DATA = "CHƯA ĐỦ DỮ LIỆU"
@@ -1351,9 +1357,16 @@ def analyze_locally(
     # one structure that only a music editor shows.
     production_signal = waveform * 0.82 + text_like * 0.18
 
+    # The measure of the screen of a music tool, taken by the vision
+    # analyzer on the same real frames. It looks for the shape of a
+    # waveform, of a timeline and of the panels of a music editor.
+    ui_measure = result.vision.production_ui if result.vision else {}
+    ui_score = float((ui_measure or {}).get("score") or 0.0)
+
     topic_signal = max(
         caption_signal,
         max(synthetic_signal, production_signal),
+        ui_score * 0.75,
     )
 
     # ---- what the local vision model really saw ------------------------
@@ -1364,6 +1377,7 @@ def analyze_locally(
     vision_reading = vision.reading if vision else None
     model_used = bool(vision and vision.model_used)
     model_ai_music = False
+    model_saw_music = False
     model_reason = ""
     if model_used and vision_reading is not None:
         # The model says what it saw. The words of the model and of the
@@ -1389,9 +1403,8 @@ def analyze_locally(
             token.strip(".,:;!?()[]{}'\"-_/\\").lower()
             for token in words.replace("/", " ").replace("-", " ").split()
         )
-        has_music = any(word in tokens for word in music_words)
-        has_ai = any(word in tokens for word in ai_words)
-        model_ai_music = has_music and has_ai
+        model_saw_music = any(word in tokens for word in music_words)
+        model_saw_ai = any(word in tokens for word in ai_words)
         model_reason = (
             f"mô hình vision {vision_reading.model or 'cục bộ'} đọc: "
             f"{vision_reading.scene or 'không mô tả'}"
@@ -1403,6 +1416,30 @@ def analyze_locally(
         )
         if vision_reading.text:
             model_reason += f"; chữ đọc được: {', '.join(vision_reading.text[:3])}"
+        # The frame the reading came from travels with it, so the admin
+        # can look at the frame the model was sure about.
+        model_reason += (
+            f" (khung {vision_reading.frame_index + 1}/{max(1, vision_reading.frames_read)})"
+        )
+
+        # A model that only knows how to name what is in a picture proves
+        # that the thing is in the picture. It does not prove that the
+        # video was made with a machine. Only a model that was trained
+        # to tell how the content was made can settle that, and even
+        # then the reading is a possibility, not proof.
+        if vision_reading.can_tell_ai_origin:
+            model_ai_music = model_saw_music and model_saw_ai
+        else:
+            # The model named what it saw. When music is among the
+            # names, that is evidence that music is in the picture, and
+            # a sign that the content is about music. It says nothing
+            # about how the music was made.
+            model_ai_music = False
+            if model_saw_music:
+                model_reason += (
+                    " — mô hình chỉ đặt tên được nội dung, chưa chứng minh "
+                    "được nội dung đó do AI tạo ra"
+                )
 
     # The picture has to show something before a caption can support it.
     if topic_signal <= 0.15 and not model_used:
@@ -1413,11 +1450,22 @@ def analyze_locally(
             + caption_reason
         )
     elif model_used and model_ai_music:
-        # The model really looked at the picture and really saw a music
-        # scene made with a machine. That is evidence.
+        # A model that was trained to tell how the content was made
+        # really looked at the picture and really saw music made with a
+        # machine. That is the strongest evidence this machine can get.
         topic_certainty = EVIDENCE
         topic_points = _FINDING_MAX["topic_fit"] * min(
             1.0, 0.65 + float(vision_reading.confidence or 0.0) * 0.35
+        )
+        topic_reason = model_reason
+    elif model_used and model_saw_music:
+        # The model named what it saw and music was among the names. The
+        # picture really does show music, and that is evidence of the
+        # subject. It says nothing about how the music was made, so the
+        # content is not decided and the dimension stays a possibility.
+        topic_certainty = POSSIBILITY
+        topic_points = _FINDING_MAX["topic_fit"] * min(
+            1.0, 0.30 + float(vision_reading.confidence or 0.0) * 0.25
         )
         topic_reason = model_reason
     elif model_used:
@@ -1444,13 +1492,27 @@ def analyze_locally(
         topic_certainty = EVIDENCE
         topic_points = _FINDING_MAX["topic_fit"] * min(1.0, 0.45 + synthetic_signal * 0.55)
         topic_reason = f"khung hình có đặc trưng ảnh tạo bằng máy ({synthetic_reason})"
+    elif ui_score >= 0.45:
+        # The frames carry the shape of a music tool: a waveform and the
+        # panels of an editor. That is a picture of the tool, so it is
+        # evidence and not only a possibility.
+        topic_certainty = EVIDENCE
+        topic_points = _FINDING_MAX["topic_fit"] * min(1.0, 0.55 + ui_score * 0.45)
+        topic_reason = (
+            f"khung hình có giao diện sản xuất nhạc "
+            f"(waveform {float((ui_measure or {}).get('waveform') or 0):.0%}, "
+            f"dải thời gian {float((ui_measure or {}).get('timeline') or 0):.0%}, "
+            f"bảng {float((ui_measure or {}).get('panels') or 0):.0%})"
+        )
     elif topic_signal >= 0.45:
         # The frames are consistent with AI content but do not prove it.
         topic_certainty = POSSIBILITY
         topic_points = _FINDING_MAX["topic_fit"] * min(1.0, topic_signal * 0.85)
         topic_reason = (
             f"khung hình nhất quán với nội dung AI nhưng chưa đủ bằng chứng "
-            f"(waveform {waveform:.0%}, chữ {text_like:.0%}, ảnh tạo máy {synthetic_score:.0%})"
+            f"(waveform {waveform:.0%}, chữ {text_like:.0%}, ảnh tạo máy {synthetic_score:.0%}"
+            + (f", giao diện sản xuất {ui_score:.0%}" if ui_score >= 0.2 else "")
+            + ")"
         )
     else:
         topic_certainty = POSSIBILITY
@@ -1519,22 +1581,35 @@ def analyze_locally(
 
     # ---- the verdict ----------------------------------------------------
     # A vision model that really looked at the picture decides on its
-    # own. A model that saw AI music settles the question; a model that
-    # did not settles it the other way. Without a model, the older
-    # signals decide as they did before.
-    if model_used:
-        if model_ai_music:
-            result.content_is_ai_music = True
-            result.content_ai_visual = synthetic_score >= 0.4
-            result.content_relevance_reason = topic_reason
-        else:
-            result.content_is_ai_music = False
-            result.content_ai_visual = False
-            result.content_relevance_reason = (
-                topic_reason
-                + " — mô hình vision đã đọc hình và không thấy nội dung nhạc AI, "
-                "video bị loại"
-            )
+    # own. A model that was trained to tell how the content was made
+    # settles the question. A model that only names what is in the
+    # picture proves the subject, but never the origin, so it leaves the
+    # question open. Without a model, the older signals decide as they
+    # did before.
+    if model_used and model_ai_music:
+        result.content_is_ai_music = True
+        result.content_ai_visual = synthetic_score >= 0.4
+        result.content_relevance_reason = topic_reason
+    elif model_used and model_saw_music:
+        # The picture really shows music, but nothing says how the music
+        # was made. The question stays open, so the candidate is not
+        # accepted and not rejected.
+        result.content_is_ai_music = None
+        result.content_ai_visual = None
+        result.content_relevance_reason = (
+            topic_reason
+            + " — mô hình thấy nội dung nhạc nhưng chưa chứng minh được "
+            "nội dung đó do AI tạo ra, máy chưa đủ bằng chứng để kết luận"
+        )
+    elif model_used:
+        # The model read the picture and did not show AI music at all.
+        result.content_is_ai_music = False
+        result.content_ai_visual = False
+        result.content_relevance_reason = (
+            topic_reason
+            + " — mô hình vision đã đọc hình và không thấy nội dung nhạc AI, "
+            "video bị loại"
+        )
     elif topic_certainty == EVIDENCE:
         result.content_is_ai_music = True
         result.content_ai_visual = synthetic_score >= 0.4
