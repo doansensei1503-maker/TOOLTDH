@@ -129,6 +129,65 @@ class PublishQueue:
                 return all_tasks
         raise QueueError(f"Task {task_id} is not queued")
 
+    ACTIVE_STATUSES = frozenset({"PREPARING", "PUBLISHING"})
+    WAITING_STATUSES = frozenset({"QUEUED", "SCHEDULED", "APPROVED"})
+    DONE_STATUSES = frozenset({"PUBLISHED"})
+    FAILED_STATUSES = frozenset({"BLOCKED", "FAILED_RETRYABLE"})
+
+    def has_active_job(self, tasks: list[QueuedTask] | None = None) -> QueuedTask | None:
+        """Return the single active upload/publish job, if any."""
+        all_tasks = tasks if tasks is not None else self.load()
+        for task in all_tasks:
+            if task.status in self.ACTIVE_STATUSES:
+                return task
+        return None
+
+    def count_today(self, day: date, tasks: list[QueuedTask] | None = None) -> int:
+        """Count queue jobs scheduled for one day (all non-failed)."""
+        all_tasks = tasks if tasks is not None else self.load()
+        count = 0
+        for task in all_tasks:
+            if task.status in self.FAILED_STATUSES:
+                continue
+            try:
+                if task.scheduled_datetime().date() == day:
+                    count += 1
+            except QueueError:
+                continue
+        return count
+
+    def count_this_hour(self, moment: datetime, tasks: list[QueuedTask] | None = None) -> int:
+        """Count queue jobs scheduled in the hour of ``moment``."""
+        all_tasks = tasks if tasks is not None else self.load()
+        count = 0
+        for task in all_tasks:
+            if task.status in self.FAILED_STATUSES:
+                continue
+            try:
+                scheduled = task.scheduled_datetime()
+            except QueueError:
+                continue
+            if scheduled.date() == moment.date() and scheduled.hour == moment.hour:
+                count += 1
+        return count
+
+    def next_queued(self, tasks: list[QueuedTask] | None = None) -> QueuedTask | None:
+        """Return the oldest QUEUED job that is not a duplicate post."""
+        all_tasks = tasks if tasks is not None else self.load()
+        queued = [task for task in all_tasks if task.status == "QUEUED"]
+        queued.sort(key=lambda task: task.scheduled_at)
+        posted_urls = {
+            str((task.metadata or {}).get("source_url", "")).strip().lower()
+            for task in all_tasks
+            if task.status in self.DONE_STATUSES | self.ACTIVE_STATUSES | {"AWAITING_APPROVAL", "PREPARING", "PUBLISHING"}
+        }
+        for task in queued:
+            url = str((task.metadata or {}).get("source_url", "")).strip().lower()
+            if url and url in posted_urls:
+                continue
+            return task
+        return queued[0] if queued else None
+
 
 __all__ = [
     "DEFAULT_QUEUE_PATH",

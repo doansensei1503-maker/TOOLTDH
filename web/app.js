@@ -21,6 +21,10 @@ const state = {
   pollTimer: null,
   analyses: [],
   previewUrl: "",
+  top5: [],
+  topicQueries: [],
+  langMarketNote: "",
+  queue: null,
 };
 
 /* ------------------------------------------------------------ helpers */
@@ -302,8 +306,13 @@ function readFilters() {
     min_comments: val("disc-min-comments"),
     min_shares: val("disc-min-shares"),
     max_duration: val("disc-max-duration"),
+    min_duration: val("disc-min-duration"),
     max_days: val("disc-days"),
     must_include: val("disc-must"),
+    must_include_any: val("disc-must-any"),
+    subtopics: val("disc-subtopics"),
+    language: val("disc-language"),
+    market: val("disc-market"),
     exclude: val("disc-exclude"),
   };
 }
@@ -322,10 +331,14 @@ async function loadDiscovery() {
       state.eligibility = data.eligibility || null;
       state.analyses = data.analyses || [];
       state.shortfallNote = data.shortfall_note || "";
+      state.top5 = data.top5 || [];
+      state.topicQueries = data.topic_queries || [];
+      state.langMarketNote = data.language_market_note || "";
       setRunStatus(data.status);
     }
   } catch (e) { /* the last result is optional */ }
   renderDiscovery();
+  loadQueue();
 }
 
 function renderDiscovery() {
@@ -370,6 +383,91 @@ function renderDiscovery() {
   renderAnalysis();
   renderTrends();
   renderFilter();
+  renderTop5();
+}
+
+function fmtAge(value) {
+  if (value === null || value === undefined || value === "") return "—";
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return "—";
+  return n === 1 ? "1 ngày" : n + " ngày";
+}
+
+function renderTop5() {
+  const box = el("disc-top5");
+  if (!box) return;
+  const cards = state.top5 || [];
+  const counter = el("disc-top5-count");
+  if (counter) counter.textContent = cards.length ? cards.length + "/5 đề xuất" : "0 đề xuất";
+  const meta = [];
+  if ((state.topicQueries || []).length) {
+    meta.push("Nhóm truy vấn: " + state.topicQueries.join(" · "));
+  }
+  if (state.langMarketNote) {
+    meta.push(state.langMarketNote);
+  }
+  const head = meta.length
+    ? '<div class="notif"><div class="notif-kind">Ghi chú</div><div class="notif-msg">' +
+      esc(meta.join(" | ")) + "</div></div>"
+    : "";
+  if (!cards.length) {
+    box.innerHTML = head + '<div class="empty">Chưa có TOP 5. Bấm “Tìm kiếm” để hệ thống đề xuất tối đa 5 video tốt nhất (không cố lấp đủ 5).</div>';
+    return;
+  }
+  box.innerHTML = head + cards.map((c, i) => {
+    const pick = !!c.pick;
+    const action = pick
+      ? "<button class='btn btn-xs btn-primary' data-enqueue='" + esc(c.source_url) + "'>Xếp hàng</button>"
+      : "";
+    return "<div class='notif'><div class='notif-kind'>TOP " + (i + 1) + " · " + num(c.score) +
+      " điểm · " + esc(c.certainty || "UNKNOWN") + "</div><div class='notif-msg'>" +
+      "<a href='" + esc(c.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>" +
+      esc((c.title || c.source_url || "").slice(0, 80)) + "</a>" +
+      "<div class='muted'>" + esc(c.creator || "") + " · " + num(c.views) + " views · " +
+      fmtAge(c.age_days) + " · quyền: " + esc(c.rights || "—") + "</div>" +
+      "<div>" + esc(c.reason || "") + "</div>" +
+      (action ? "<div class='row' style='margin-top:6px'>" + action + "</div>" : "") +
+      "</div></div>";
+  }).join("");
+}
+
+async function loadQueue() {
+  const box = el("queue-table");
+  if (!box) return;
+  try {
+    const q = await api("/queue");
+    state.queue = q;
+    const tasks = q.tasks || [];
+    box.innerHTML =
+      "<thead><tr><th>Task</th><th>Nguồn</th><th>Lịch</th><th>Trạng thái</th></tr></thead><tbody>" +
+      (tasks.length ? tasks.slice(-20).map((t) =>
+        "<tr><td>" + esc(t.task_id) + "</td>" +
+        "<td class='muted'>" + esc((t.source_url || "").slice(0, 60)) + "</td>" +
+        "<td class='muted'>" + esc(fmtDate(t.scheduled_at)) + "</td>" +
+        "<td>" + tag(t.status || "—", statusKind(t.status)) + "</td></tr>").join("")
+        : emptyRow(4, "Hàng đợi trống. Xếp video đủ điều kiện từ TOP 5.")) +
+      "</tbody>";
+    const info = el("queue-info");
+    if (info) {
+      info.textContent =
+        "Đang hoạt động: " + (q.active_task || "—") +
+        " · Hôm nay dùng theo lịch · Tối đa " + (q.max_per_day ?? "—") + " bài/ngày" +
+        " · " + (q.max_per_hour ?? "—") + " bài/giờ" +
+        " · kiểm tra mỗi " + (q.check_every_hours ?? "—") + " giờ" +
+        " · auto_post: " + (q.auto_post ? "BẬT" : "TẮT (approval mode)");
+    }
+  } catch (e) { box.innerHTML = "<tbody>" + emptyRow(4, "Không đọc được hàng đợi.") + "</tbody>"; }
+}
+
+async function enqueueTop5(sourceUrl) {
+  try {
+    const r = await api("/queue/enqueue", {
+      method: "POST",
+      body: JSON.stringify({ source_url: sourceUrl }),
+    });
+    toast("Đã xếp hàng: " + r.task_id + " (" + r.status + ")", "ok");
+    await loadQueue();
+  } catch (e) { toast(e.message, "err"); }
 }
 
 /* The AI content analysis of every candidate. Only the candidates whose
@@ -764,6 +862,9 @@ async function loadScheduler() {
     if (s.topic) el("sched-topic").value = s.topic;
     if (s.daily_time) el("sched-time").value = s.daily_time;
     if (s.daily_limit) el("sched-limit").value = s.daily_limit;
+    if (s.max_per_day && el("sched-max-day")) el("sched-max-day").value = s.max_per_day;
+    if (s.max_per_hour && el("sched-max-hour")) el("sched-max-hour").value = s.max_per_hour;
+    if (s.check_every_hours && el("sched-check-hours")) el("sched-check-hours").value = s.check_every_hours;
     el("sched-runs").innerHTML =
       "<thead><tr><th>Thời điểm</th><th>Task</th><th>Trạng thái</th><th>Số video</th><th>Blocker</th></tr></thead><tbody>" +
       ((s.runs || []).length ? s.runs.map((r) =>
@@ -779,6 +880,29 @@ async function loadScheduler() {
       next.textContent = s.next_run
         ? "Lần chạy tiếp theo: " + s.next_run
         : "Chưa có lần chạy tiếp theo.";
+    }
+    const q = s.queue || {};
+    const qbox = el("sched-queue");
+    if (qbox) {
+      const tasks = q.tasks || [];
+      qbox.innerHTML =
+        "<thead><tr><th>Task</th><th>Nguồn</th><th>Lịch</th><th>Trạng thái</th></tr></thead><tbody>" +
+        (tasks.length ? tasks.map((t) =>
+          "<tr><td>" + esc(t.task_id) + "</td>" +
+          "<td class='muted'>" + esc((t.source_url || "").slice(0, 60)) + "</td>" +
+          "<td class='muted'>" + esc(fmtDate(t.scheduled_at)) + "</td>" +
+          "<td>" + tag(t.status || "—", statusKind(t.status)) + "</td></tr>").join("")
+          : emptyRow(4, "Hàng đợi trống. Xếp video đủ điều kiện từ TOP 5.")) +
+        "</tbody>";
+    }
+    const qinfo = el("sched-queue-info");
+    if (qinfo) {
+      qinfo.textContent =
+        "QUEUED: " + (q.queued ?? "—") +
+        " · đang hoạt động: " + (q.active || "—") + (q.active_status ? " (" + q.active_status + ")" : "") +
+        " · tối đa " + (s.max_per_day ?? "—") + " bài/ngày · " + (s.max_per_hour ?? "—") +
+        " bài/giờ · kiểm tra mỗi " + (s.check_every_hours ?? "—") + " giờ" +
+        (q.last_queue_run && q.last_queue_run.at ? " · lần xếp gần nhất: " + q.last_queue_run.at : "");
     }
   } catch (e) { toast(e.message, "err"); }
 }
@@ -903,6 +1027,9 @@ async function pollJob(jobId) {
       state.eligibility = detail.eligibility || null;
       state.analyses = detail.analyses || [];
       state.shortfallNote = detail.shortfall_note || "";
+      state.top5 = detail.top5 || [];
+      state.topicQueries = detail.topic_queries || [];
+      state.langMarketNote = detail.language_market_note || "";
       setRunStatus(detail.status);
       renderDiscovery();
       const message = detail.status === "CANDIDATE_FOUND"
@@ -1225,7 +1352,10 @@ async function saveProfile() {
     min_comments: el("disc-min-comments").value,
     min_shares: el("disc-min-shares").value,
     max_duration: el("disc-max-duration").value,
+    min_duration: (el("disc-min-duration") || {}).value || "",
     must_include: el("disc-must").value,
+    must_include_any: (el("disc-must-any") || {}).value || "",
+    subtopics: (el("disc-subtopics") || {}).value || "",
     exclude: el("disc-exclude").value,
   };
   try {
@@ -1250,7 +1380,10 @@ async function loadProfile(name) {
     el("disc-min-comments").value = profile.min_comments || "";
     el("disc-min-shares").value = profile.min_shares || "";
     el("disc-max-duration").value = profile.max_duration || "";
+    if (el("disc-min-duration")) el("disc-min-duration").value = profile.min_duration || "";
     el("disc-must").value = profile.must_include || "";
+    if (el("disc-must-any")) el("disc-must-any").value = profile.must_include_any || "";
+    if (el("disc-subtopics")) el("disc-subtopics").value = profile.subtopics || "";
     el("disc-exclude").value = profile.exclude || "";
     toast("Đã nạp cấu hình “" + name + "”.", "ok");
   } catch (e) { toast(e.message, "err"); }
@@ -1276,6 +1409,9 @@ async function saveSchedule() {
           frequency: el("sched-freq").value,
           days,
           daily_limit: Number(el("sched-limit").value) || 1,
+          max_per_day: Number(el("sched-max-day").value) || 1,
+          max_per_hour: Number(el("sched-max-hour").value) || 1,
+          check_every_hours: Number(el("sched-check-hours").value) || 1,
           topic: el("sched-topic").value.trim(),
         },
       }),
@@ -1457,6 +1593,13 @@ function bindEvents() {
     const approve = e.target.closest("[data-approve]");
     if (approve) approveCandidate(approve.dataset.approve);
   });
+  const top5box = el("disc-top5");
+  if (top5box) {
+    top5box.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-enqueue]");
+      if (btn) enqueueTop5(btn.dataset.enqueue);
+    });
+  }
   // The AI analysis panel carries its own preview, approve and reject
   // buttons for every candidate it shows.
   el("disc-analysis").addEventListener("click", (e) => {

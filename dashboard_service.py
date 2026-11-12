@@ -260,6 +260,7 @@ def _schedule_status() -> dict[str, Any]:
     settings = ScheduleSettings.from_config(config)
     state = _read_json(SCHEDULE_STATE_FILE, {})
     runs = state.get("runs", []) if isinstance(state, dict) else []
+    queue_runs = state.get("queue_runs", []) if isinstance(state, dict) else []
     last_run = runs[0] if runs else {}
     next_run = ""
     try:
@@ -271,6 +272,23 @@ def _schedule_status() -> dict[str, Any]:
         next_run = candidate.isoformat()
     except Exception:
         next_run = ""
+    queue_info: dict[str, Any] = {}
+    try:
+        from task_queue import PublishQueue
+
+        queue = PublishQueue()
+        tasks = queue.load()
+        active = queue.has_active_job(tasks)
+        queue_info = {
+            "queued": len([t for t in tasks if t.status == "QUEUED"]),
+            "active": active.task_id if active else "",
+            "active_status": active.status if active else "",
+            "today": queue.count_today(date.today(), tasks),
+            "this_hour": queue.count_this_hour(datetime.now(), tasks),
+            "last_queue_run": queue_runs[0] if queue_runs else {},
+        }
+    except Exception:
+        queue_info = {}
     return {
         "enabled": settings.enabled,
         "daily_time": settings.daily_time,
@@ -278,6 +296,10 @@ def _schedule_status() -> dict[str, Any]:
         "next_run": next_run,
         "last_run": last_run,
         "run_count": len(runs),
+        "max_per_day": settings.max_per_day,
+        "max_per_hour": settings.max_per_hour,
+        "check_every_hours": settings.check_every_hours,
+        "queue": queue_info,
     }
 
 
@@ -398,6 +420,31 @@ def scheduler_status() -> dict[str, Any]:
                 next_run = ""
     state = _read_json(SCHEDULE_STATE_FILE, {})
     runs = state.get("runs", []) if isinstance(state, dict) else []
+    queue_runs = state.get("queue_runs", []) if isinstance(state, dict) else []
+    queue_info: dict[str, Any] = {}
+    try:
+        from task_queue import PublishQueue
+
+        queue = PublishQueue()
+        tasks = queue.load()
+        active = queue.has_active_job(tasks)
+        queue_info = {
+            "queued": len([t for t in tasks if t.status == "QUEUED"]),
+            "active": active.task_id if active else "",
+            "active_status": active.status if active else "",
+            "tasks": [
+                {
+                    "task_id": t.task_id,
+                    "status": t.status,
+                    "scheduled_at": t.scheduled_at,
+                    "source_url": str((t.metadata or {}).get("source_url", "")),
+                }
+                for t in tasks[-20:]
+            ],
+            "last_queue_run": queue_runs[0] if queue_runs else {},
+        }
+    except Exception:
+        queue_info = {}
     return {
         "enabled": bool(settings.enabled),
         "running": running,
@@ -405,12 +452,89 @@ def scheduler_status() -> dict[str, Any]:
         "frequency": settings.frequency,
         "days": list(settings.days),
         "daily_limit": settings.daily_limit,
+        "max_per_day": settings.max_per_day,
+        "max_per_hour": settings.max_per_hour,
+        "check_every_hours": settings.check_every_hours,
         "topic": settings.topic,
+        "min_views": str(((config.get("discovery", {}) or {}).get("filters", {}) or {}).get("min_views", "")),
         "next_run": next_run,
         "runs": runs[:20],
         "run_count": len(runs),
         "last_run": runs[0] if runs else {},
+        "queue": queue_info,
     }
+
+
+def queue_list() -> dict[str, Any]:
+    """Return the sequential posting queue (single active job kept)."""
+    from task_queue import PublishQueue
+
+    config = _load_config()
+    settings = ScheduleSettings.from_config(config)
+    queue = PublishQueue()
+    try:
+        tasks = queue.load()
+    except Exception as exc:
+        raise ServiceError(f"Không đọc được hàng đợi: {exc}") from exc
+    active = queue.has_active_job(tasks)
+    return {
+        "tasks": [
+            {
+                "task_id": t.task_id,
+                "creator_id": t.creator_id,
+                "scheduled_at": t.scheduled_at,
+                "status": t.status,
+                "mode": t.mode,
+                "source_url": str((t.metadata or {}).get("source_url", "")),
+            }
+            for t in tasks
+        ],
+        "active_task": active.task_id if active else "",
+        "max_per_day": settings.max_per_day,
+        "max_per_hour": settings.max_per_hour,
+        "check_every_hours": settings.check_every_hours,
+        "auto_post": bool(config.get("auto_post", False)),
+    }
+
+
+def queue_enqueue(source_url: str = "", task_id: str = "") -> dict[str, Any]:
+    """Queue one eligible video as QUEUED (no duplicate, no parallel)."""
+    from datetime import timedelta as _td
+    from task_queue import PublishQueue, QueuedTask
+
+    wanted = str(source_url or "").strip()
+    if not wanted:
+        raise ServiceError("Không có URL video để xếp hàng.")
+    result = _LAST_RESULT or _load_last_result()
+    top5 = result.get("top5", []) if isinstance(result, dict) else []
+    card = next((c for c in top5 if str(c.get("source_url", "")) == wanted), None)
+    if card is None:
+        raise ServiceError("Video không nằm trong TOP 5 đề xuất nên không xếp hàng.")
+    if not card.get("pick"):
+        raise ServiceError(f"Video chưa đủ điều kiện xếp hàng: {card.get('reason', '')}")
+    queue = PublishQueue()
+    tasks = queue.load()
+    for existing in tasks:
+        if str(((existing.metadata or {}).get("source_url", ""))).strip() == wanted:
+            if existing.status not in ("BLOCKED", "FAILED_RETRYABLE"):
+                raise ServiceError(f"Video đã có trong hàng đợi ({existing.task_id}/{existing.status}).")
+    tid = str(task_id or "").strip() or f"q-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    if queue.find(tid, tasks) is not None:
+        raise ServiceError(f"Task {tid} đã có trong hàng đợi.")
+    scheduled_at = (datetime.now() + _td(minutes=5)).isoformat(timespec="seconds")
+    job = QueuedTask(
+        task_id=tid,
+        creator_id=str(card.get("creator", "") or "").lstrip("@"),
+        scheduled_at=scheduled_at,
+        caption=str(card.get("title", "")),
+        video_path="",
+        status="QUEUED",
+        mode=str(_load_settings().get("mode", "approve")),
+        metadata={"source_url": wanted, "score": card.get("score", 0)},
+    )
+    tasks = queue.add(job, tasks)
+    queue.save(tasks)
+    return {"task_id": tid, "status": "QUEUED", "scheduled_at": scheduled_at}
 
 
 def scheduler_start() -> dict[str, Any]:
@@ -788,6 +912,28 @@ def _discovery_request(
 
     result = selection.to_dict()
     result["status"] = _run_status(selection, all_blockers)
+    try:
+        from discovery_live import TOP5_LIMIT, build_top5_cards, language_market_note
+
+        result["top5"] = build_top5_cards(
+            list(selection.scores or []),
+            config,
+            analyses_by_url=analysis_by_url,
+            limit=TOP5_LIMIT,
+            subtopics=list(search_filters.subtopics or []),
+        )
+        note = language_market_note(search_filters)
+        if note:
+            result["language_market_note"] = note
+            all_blockers.append(note)
+        try:
+            from discovery_live import expand_topic_queries as _expand_q
+
+            result["topic_queries"] = _expand_q(topic, max_queries=5) or [topic]
+        except Exception:
+            result["topic_queries"] = [topic]
+    except Exception:
+        result.setdefault("top5", [])
     result["mode"] = str(_load_settings().get("mode", config.get("mode", "approve")))
     result["downloaded"] = False
     result["eligibility"] = _eligibility_report(selection)

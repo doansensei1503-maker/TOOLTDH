@@ -121,6 +121,63 @@ NON_MUSIC_AI_WORDS = frozenset(
      "gym", "drawing", "painting", "3d", "model", "logo", "thumbnail"}
 )
 
+# Words that mark a video as a tool tutorial or guide rather than a song
+# performance. A tutorial is never counted as a music performance, no
+# matter which topic asked for it.
+TUTORIAL_WORDS = frozenset(
+    {"tutorial", "tutorials", "guide", "guides", "how to", "howto",
+     "hướng dẫn", "huong dan", "dạy", "học làm", "review công cụ",
+     "tool review", "top 10 ai", "top ai tools", "cách dùng", "cách tạo",
+     "prompt engineering", "workflow tutorial"}
+)
+
+# Sub-query clusters for the AI Music subject. Generic topics never use
+# this list; only a topic that names both the AI signal and the music
+# market expands to it.
+AI_MUSIC_SUBQUERIES = (
+    "AI song", "AI cover", "AI remix", "Suno music", "Udio song",
+)
+
+MAX_TOPIC_QUERIES = 5
+
+
+def is_tutorial_title(title: str) -> bool:
+    """Return True when the caption reads like a tool guide, not a song."""
+    haystack = str(title or "").lower()
+    if not haystack.strip():
+        return False
+    return any(word in haystack for word in TUTORIAL_WORDS)
+
+
+def expand_topic_queries(topic: str, max_queries: int = MAX_TOPIC_QUERIES) -> list[str]:
+    """Return the sub-queries used to collect candidates for one topic.
+
+    The queries are only a collection device; the content check later
+    decides what the video really is. An AI Music topic expands to its
+    sub-clusters (song, cover, remix, Suno, Udio). Any other topic is
+    searched as-is, so AI Music terms are never injected into it.
+    At most ``max_queries`` terms are returned so the platform quota and
+    the browser session stay bounded.
+    """
+    base = str(topic or "").strip()
+    if not base:
+        return []
+    lowered = base.lower()
+    wants_ai = any(word in lowered for word in ("ai", "suno", "udio"))
+    wants_market = any(
+        word in lowered
+        for word in ("music", "song", "cover", "remix", "nhạc", "nhac")
+    )
+    if wants_ai and wants_market:
+        queries: list[str] = []
+        for term in [base, *AI_MUSIC_SUBQUERIES]:
+            if term.lower() not in {item.lower() for item in queries}:
+                queries.append(term)
+            if len(queries) >= max_queries:
+                break
+        return queries
+    return [base]
+
 
 @dataclass
 class SearchFilters:
@@ -140,6 +197,13 @@ class SearchFilters:
     max_days: int = 0
     must_include: list[str] = field(default_factory=list)
     exclude: list[str] = field(default_factory=list)
+    # ANY group: at least one must be present when set.
+    must_include_any: list[str] = field(default_factory=list)
+    # Requested subtopics get ranking priority, never invented as queries.
+    subtopics: list[str] = field(default_factory=list)
+    # Requested but not verifiable from the TikTok payload (honest note).
+    language: str = ""
+    market: str = ""
 
     @classmethod
     def from_payload(cls, payload: dict[str, Any] | None) -> "SearchFilters":
@@ -183,6 +247,10 @@ class SearchFilters:
             max_days=_int("max_days"),
             must_include=_words("must_include"),
             exclude=_words("exclude"),
+            must_include_any=_words("must_include_any"),
+            subtopics=_words("subtopics") or _words("subtopic_priority"),
+            language=str(data.get("language") or "").strip(),
+            market=str(data.get("market") or "").strip(),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -637,6 +705,12 @@ def topic_matches(title: str, topic: str) -> bool:
     if required and not all(token in haystack for token in required):
         return False
 
+    # A tutorial about an AI tool is not a song performance. When the topic
+    # asks for an AI music market, a guide is never a match, no matter
+    # which words its caption carries.
+    if (wants_market and wants_ai) and is_tutorial_title(title):
+        return False
+
     # A video whose AI work is clearly about another medium is not an AI
     # music video. The market word has to be the subject of the video, not a
     # word that happens to appear in a caption about an AI filter.
@@ -707,12 +781,136 @@ def _filter_reason(candidate: DiscoveredVideo, filters: "SearchFilters") -> str:
         missing = [word for word in filters.must_include if word.lower() not in haystack]
         if missing:
             return f"thiếu từ khóa bắt buộc: {', '.join(missing)}"
+    if filters.must_include_any:
+        haystack = f"{candidate.title} {candidate.topic}".lower()
+        present_any = [word for word in filters.must_include_any if word.lower() in haystack]
+        if not present_any:
+            return f"thiếu nhóm từ khóa ANY: cần ít nhất một trong {', '.join(filters.must_include_any)}"
     if filters.exclude:
         haystack = f"{candidate.title} {candidate.topic}".lower()
         present = [word for word in filters.exclude if word.lower() in haystack]
         if present:
             return f"chứa từ khóa loại trừ: {', '.join(present)}"
     return ""
+
+
+TOP5_LIMIT = 5
+
+
+def candidate_age_days(candidate: "DiscoveredVideo") -> int | None:
+    """Return the age of a candidate in days, or None when unknown."""
+    posted = _posted_date(candidate.posted_at)
+    if posted is None:
+        return None
+    return (date.today() - posted).days
+
+
+def rights_status_of(source_url: str, config: dict[str, Any]) -> str:
+    """Return the reuse rights status of a candidate without downloading."""
+    try:
+        from discover import validate_source_permitted
+
+        validate_source_permitted(source_url, config)
+        return "ALLOWLISTED_PERMITTED"
+    except Exception as exc:  # noqa: BLE001 - the status string carries it
+        reason = str(exc)
+        if "allowlist" in reason.lower():
+            return "NOT_ALLOWLISTED"
+        return "BLOCKED_NO_RIGHTS"
+
+
+def language_market_note(filters: "SearchFilters | None") -> str:
+    """Return an honest note when language/market cannot be verified."""
+    if filters is None:
+        return ""
+    wanted = [part for part in (str(filters.language or "").strip(), str(filters.market or "").strip()) if part]
+    if not wanted:
+        return ""
+    # The TikTok search payload carries no reliable language/market field,
+    # so the request is recorded but never pretended to be filtered.
+    return (
+        "Ngôn ngữ/thị trường yêu cầu (" + "/".join(wanted) + ") chưa thể xác minh "
+        "vì payload TikTok không cung cấp trường đáng tin cậy — hiển thị để ghi nhận, không giả vờ đã lọc."
+    )
+
+
+def build_top5_cards(
+    scored: list[Any],
+    config: dict[str, Any],
+    *,
+    analyses_by_url: dict[str, Any] | None = None,
+    limit: int = TOP5_LIMIT,
+    subtopics: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build at most TOP 5 candidate cards from ranked trending scores.
+
+    Weights are untouched (scores come from `score_all_trending`). Duplicates
+    and videos without enough evidence are skipped; the list is never forced
+    to 5. No growth rate is invented — only real views/age/score are shown.
+    """
+    cards: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    analyses_by_url = analyses_by_url or {}
+    wanted_subs = [str(item).strip().lower() for item in (subtopics or []) if str(item).strip()]
+
+    def _sub_priority(video: Any) -> int:
+        if not wanted_subs:
+            return 0
+        haystack = f"{getattr(video, 'title', '')} {getattr(video, 'topic', '')}".lower()
+        for sub in wanted_subs:
+            if sub and sub in haystack:
+                return 1
+        return 0
+
+    ordered = sorted(
+        list(scored or []),
+        key=lambda item: (_sub_priority(getattr(item, "video", None)), int(getattr(item, "score", 0) or 0)),
+        reverse=True,
+    )
+    for item in ordered:
+        video = getattr(item, "video", None)
+        if video is None:
+            continue
+        url = str(getattr(video, "source_url", "") or "").strip()
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        # Insufficient-evidence videos never become recommendations.
+        analysis = analyses_by_url.get(url)
+        content_relevant = getattr(analysis, "content_relevant", None) if analysis is not None else None
+        if content_relevant is False:
+            continue
+        certainty = "UNKNOWN"
+        if content_relevant is True:
+            certainty = "HIGH"
+        elif bool(getattr(video, "ai_label_known", False)):
+            certainty = "MEDIUM" if bool(getattr(video, "is_ai_generated", False)) else "LOW"
+        age = candidate_age_days(video)
+        rights = rights_status_of(url, config)
+        pick = getattr(item, "decision", "") == "ACCEPT"
+        reason = str(getattr(item, "reason", "") or "").strip()
+        if analysis is not None:
+            extra = str(getattr(analysis, "summary", "") or getattr(analysis, "content_relevance_reason", "") or "").strip()
+            if extra:
+                reason = (reason + " | " + extra).strip(" |") if reason else extra
+        if rights != "ALLOWLISTED_PERMITTED":
+            pick = False
+            reason = (reason + " | quyền: " + rights).strip(" |") if reason else ("quyền: " + rights)
+        cards.append({
+            "source_url": url,
+            "creator": str(getattr(video, "creator", "") or ""),
+            "title": str(getattr(video, "title", "") or ""),
+            "views": int(getattr(video, "views", 0) or 0),
+            "age_days": age,
+            "score": int(getattr(item, "score", 0) or 0),
+            "certainty": certainty,
+            "pick": pick,
+            "reason": reason or ("chọn" if pick else "loại: chưa đủ điều kiện"),
+            "rights": rights,
+        })
+        if len(cards) >= max(1, int(limit or TOP5_LIMIT)):
+            break
+    return cards
 
 
 def _posted_date(value: str) -> date | None:
@@ -881,20 +1079,26 @@ def discover_new_candidates(
     discovery = config.get("discovery", {}) if isinstance(config.get("discovery", {}), dict) else {}
     configured = str(discovery.get("target_topic", "")).strip()
     requested = str(topic or "").strip()
+    base_topic = requested or configured
 
-    # The topics the run searches for. The admin's keyword comes first so it
-    # is always searched for, and the default markets follow it.
+    # Topic-aware query expansion. The queries only collect candidates;
+    # verification happens later via metadata + Local Audio/Vision. An AI
+    # Music topic expands to its sub-clusters (song/cover/remix/Suno/Udio).
+    # Any other topic is searched as-is so AI Music terms are never
+    # injected into it. At most MAX_TOPIC_QUERIES terms are searched.
     topics: list[str] = []
-    for value in (requested, configured):
-        if value and value.lower() not in {item.lower() for item in topics}:
-            topics.append(value)
-    defaults = discovery.get("default_topics")
-    if not isinstance(defaults, (list, tuple)) or not defaults:
-        defaults = list(DEFAULT_SEARCH_TOPICS)
-    for value in defaults:
-        text = str(value).strip()
-        if text and text.lower() not in {item.lower() for item in topics}:
-            topics.append(text)
+    if base_topic:
+        topics = expand_topic_queries(base_topic, max_queries=MAX_TOPIC_QUERIES)
+    else:
+        defaults = discovery.get("default_topics")
+        if not isinstance(defaults, (list, tuple)) or not defaults:
+            defaults = list(DEFAULT_SEARCH_TOPICS)
+        for value in defaults:
+            text = str(value).strip()
+            if text and text.lower() not in {item.lower() for item in topics}:
+                topics.append(text)
+            if len(topics) >= MAX_TOPIC_QUERIES:
+                break
     if not topics:
         raise DiscoveryError("Rejected: no topic was supplied for discovery")
 
@@ -1039,16 +1243,25 @@ def require_candidates(candidates: list[DiscoveredVideo]) -> list[DiscoveredVide
 
 
 __all__ = [
+    "AI_MUSIC_SUBQUERIES",
     "DEFAULT_SEARCH_TOPICS",
     "DiscoveryBlockedError",
     "ITEM_LIST_URL_MARKER",
+    "MAX_TOPIC_QUERIES",
     "SEARCH_RESULTS_URL_MARKER",
     "SearchFilters",
+    "TOP5_LIMIT",
     "apply_search_filters",
+    "build_top5_cards",
+    "candidate_age_days",
     "discover_by_keyword",
     "discover_new_candidates",
+    "expand_topic_queries",
+    "is_tutorial_title",
+    "language_market_note",
     "parse_search_results",
     "require_candidates",
+    "rights_status_of",
     "save_production_candidates",
     "to_candidate",
     "topic_matches",

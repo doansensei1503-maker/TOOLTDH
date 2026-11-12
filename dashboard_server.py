@@ -70,6 +70,8 @@ def _route(method: str, path: str) -> Callable[..., Any] | None:
         ("GET", "/api/scheduler"): service.scheduler_status,
         ("POST", "/api/scheduler/start"): service.scheduler_start,
         ("POST", "/api/scheduler/stop"): service.scheduler_stop,
+        ("GET", "/api/queue"): service.queue_list,
+        ("POST", "/api/queue/enqueue"): service.queue_enqueue,
         ("POST", "/api/editor/inspect"): service.inspect_media,
     }
     handler = routes.get((method, path))

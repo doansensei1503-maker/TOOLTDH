@@ -36,6 +36,9 @@ class ScheduleSettings:
     frequency: str = "daily"
     days: list[str] = field(default_factory=list)
     daily_limit: int = 1
+    max_per_day: int = 1
+    max_per_hour: int = 1
+    check_every_hours: int = 1
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "ScheduleSettings":
@@ -52,12 +55,18 @@ class ScheduleSettings:
         frequency = "daily"
         days: list[str] = []
         daily_limit = 1
+        max_per_day = 1
+        max_per_hour = 1
+        check_every_hours = 1
         if isinstance(raw, dict):
             daily_time = str(raw.get("daily_time", raw.get("time", daily_time)))
             enabled = bool(raw.get("enabled", False))
             frequency = str(raw.get("frequency", "daily"))
             days = [str(day) for day in raw.get("days", []) or []]
             daily_limit = int(raw.get("daily_limit", 1) or 1)
+            max_per_day = int(raw.get("max_per_day", raw.get("daily_limit", max_per_day)) or 1)
+            max_per_hour = int(raw.get("max_per_hour", 1) or 1)
+            check_every_hours = int(raw.get("check_every_hours", raw.get("check_hours", 1)) or 1)
         elif isinstance(raw, str) and raw.strip():
             daily_time = raw.strip()
 
@@ -75,12 +84,19 @@ class ScheduleSettings:
             frequency = str(stored.get("frequency", frequency))
             days = [str(day) for day in stored.get("days", days) or []]
             daily_limit = int(stored.get("daily_limit", daily_limit) or 1)
+            max_per_day = int(stored.get("max_per_day", stored.get("daily_limit", max_per_day)) or 1)
+            max_per_hour = int(stored.get("max_per_hour", max_per_hour) or 1)
+            check_every_hours = int(stored.get("check_every_hours", stored.get("check_hours", check_every_hours)) or 1)
             topic_override = str(stored.get("topic", "")).strip()
         else:
             topic_override = ""
 
         discovery = config.get("discovery", {}) if isinstance(config.get("discovery", {}), dict) else {}
         topic = topic_override or str(discovery.get("target_topic", "")).strip()
+        daily_limit = max(1, int(daily_limit or 1))
+        max_per_day = max(1, int(max_per_day or daily_limit))
+        max_per_hour = max(1, int(max_per_hour or 1))
+        check_every_hours = min(24, max(1, int(check_every_hours or 1)))
         return cls(
             daily_time=daily_time,
             enabled=enabled,
@@ -89,6 +105,9 @@ class ScheduleSettings:
             frequency=frequency,
             days=days,
             daily_limit=daily_limit,
+            max_per_day=max_per_day,
+            max_per_hour=max_per_hour,
+            check_every_hours=check_every_hours,
         )
 
 
@@ -288,6 +307,65 @@ def run_retention_pass(
     return result
 
 
+def run_queue_pass(
+    config: dict[str, Any] | None = None,
+    *,
+    log: Callable[[str], None] = print,
+    state_path: Path = SCHEDULE_STATE_FILE,
+    now: datetime | None = None,
+) -> str:
+    """Advance the single-active posting queue by one step.
+
+    Only one PREPARING/PUBLISHING job may exist at a time. The pass never
+    publishes: it moves the oldest QUEUED job to PREPARING then
+    AWAITING_APPROVAL so a human (or an explicitly enabled auto-post run
+    with valid rights) can continue via the existing workflow/poster path.
+    Daily/hourly caps stop the pass; duplicates are skipped via the queue.
+    """
+    from task_queue import PublishQueue
+
+    settings = ScheduleSettings.from_config(config or {})
+    queue = PublishQueue()
+    try:
+        tasks = queue.load()
+    except Exception as exc:
+        log(f"QUEUE: cannot read queue: {exc}")
+        return "FAILED"
+    active = queue.has_active_job(tasks)
+    if active is not None:
+        log(f"QUEUE: skipped, job {active.task_id} is already {active.status}.")
+        return "SKIP_ACTIVE"
+    moment = now or datetime.now()
+    max_day = max(1, int(settings.max_per_day or settings.daily_limit or 1))
+    max_hour = max(1, int(settings.max_per_hour or 1))
+    if queue.count_today(moment.date(), tasks) >= max_day:
+        log(f"QUEUE: skipped, reached {max_day} job(s) today.")
+        return "LIMIT_DAY"
+    if queue.count_this_hour(moment, tasks) >= max_hour:
+        log(f"QUEUE: skipped, reached {max_hour} job(s) this hour.")
+        return "LIMIT_HOUR"
+    nxt = queue.next_queued(tasks)
+    if nxt is None:
+        return "EMPTY"
+    try:
+        tasks = queue.update_status(nxt.task_id, "PREPARING", tasks=tasks)
+        tasks = queue.update_status(nxt.task_id, "AWAITING_APPROVAL", tasks=tasks)
+        queue.save(tasks)
+    except Exception as exc:
+        log(f"QUEUE: cannot advance {nxt.task_id}: {exc}")
+        return "FAILED"
+    state = load_schedule_state(state_path)
+    state.setdefault("queue_runs", []).append({
+        "at": moment.isoformat(),
+        "task_id": nxt.task_id,
+        "status": "AWAITING_APPROVAL",
+    })
+    state["queue_runs"] = state["queue_runs"][-30:]
+    save_schedule_state(state, state_path)
+    log(f"QUEUE: {nxt.task_id} is AWAITING_APPROVAL (single active job kept).")
+    return "AWAITING_APPROVAL"
+
+
 def build_scheduler(
     config: dict[str, Any],
     *,
@@ -356,6 +434,23 @@ def build_scheduler(
         coalesce=True,
         replace_existing=True,
     )
+
+    # The queue pass runs on the SAME scheduler every N hours. It only
+    # advances one QUEUED job to AWAITING_APPROVAL and never publishes.
+    try:
+        step = max(1, min(24, int(settings.check_every_hours or 1)))
+    except (TypeError, ValueError):
+        step = 1
+    scheduler.add_job(
+        run_queue_pass,
+        trigger=CronTrigger(minute=minute % 60, hour=f"*/{step}"),
+        id="toolt-dh-queue",
+        args=[config],
+        kwargs={"log": log, "state_path": state_path},
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
     return scheduler
 
 
@@ -387,6 +482,7 @@ __all__ = [
     "build_scheduler",
     "load_schedule_state",
   "parse_daily_time",
+  "run_queue_pass",
   "run_retention_pass",
   "run_scheduled_task",
     "save_schedule_state",

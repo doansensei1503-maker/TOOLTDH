@@ -155,8 +155,17 @@
             <label>Thời lượng tối đa (giây)
               <input id="disc-max-duration" type="number" min="0" placeholder="600">
             </label>
-            <label class="span-2">Từ khóa bắt buộc
+            <label>Thời lượng tối thiểu (giây)
+              <input id="disc-min-duration" type="number" min="0" placeholder="0">
+            </label>
+            <label class="span-2">Từ khóa bắt buộc (ALL)
               <input id="disc-must" type="text" placeholder="ai cover, ai remix">
+            </label>
+            <label class="span-2">Từ khóa chỉ cần một (ANY)
+              <input id="disc-must-any" type="text" placeholder="suno, udio">
+            </label>
+            <label class="span-2">Chủ đề con ưu tiên
+              <input id="disc-subtopics" type="text" placeholder="cover, remix">
             </label>
             <label class="span-2">Từ khóa loại trừ
               <input id="disc-exclude" type="text" placeholder="spam, scam">
@@ -237,6 +246,15 @@
           </div>
           <div id="disc-blockers" class="stack"></div>
           <div class="table-wrap"><table class="table" id="disc-table"></table></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>TOP 5 video đề xuất</h3>
+            <span class="tag tag-accent" id="disc-top5-count">0 đề xuất</span>
+          </div>
+          <p class="note">Tối đa 5 video tốt nhất, không cố lấp đủ 5. Chỉ video đủ điều kiện mới có nút “Xếp hàng”.</p>
+          <div id="disc-top5" class="stack"></div>
         </div>
       </div>
 
@@ -378,6 +396,15 @@
             <label>Giới hạn lượt tìm kiếm / ngày
               <input id="sched-limit" type="number" min="1" max="100" value="1">
             </label>
+            <label>Số bài đăng tối đa / ngày
+              <input id="sched-max-day" type="number" min="1" max="20" value="1">
+            </label>
+            <label>Số bài đăng tối đa / giờ
+              <input id="sched-max-hour" type="number" min="1" max="5" value="1">
+            </label>
+            <label>Kiểm tra hàng đợi mỗi (giờ)
+              <input id="sched-check-hours" type="number" min="1" max="24" value="1">
+            </label>
             <label>Chủ đề
               <input id="sched-topic" type="text" placeholder="AI Music">
             </label>
@@ -401,6 +428,14 @@
             <span class="tag tag-accent" id="sched-next">—</span>
           </div>
           <div class="table-wrap"><table class="table" id="sched-runs"></table></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h3>Hàng đợi đăng tuần tự</h3>
+            <span class="tag" id="sched-queue-info">—</span>
+          </div>
+          <p class="note">Mỗi lần chỉ một job PREPARING/PUBLISHING hoạt động. Mặc định giữ approval mode; chỉ auto-publish khi người dùng bật và quyền hợp lệ.</p>
+          <div class="table-wrap"><table class="table" id="sched-queue"></table></div>
         </div>
       </div>
 
