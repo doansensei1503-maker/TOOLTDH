@@ -1,0 +1,170 @@
+# ---------------------------------------------------------------------------
+# TOOLTDH - the files that never go on GitHub.
+#
+# The keys, the cookies, the browser profile, the videos and the runtime
+# state stay on this machine. The example file stays, so the project can
+# be set up again somewhere else.
+# ---------------------------------------------------------------------------
+
+# ---- the keys and the secrets ---------------------------------------------
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+secrets.json
+credentials.json
+service-account*.json
+cookies.txt
+cookies.json
+*_cookies.txt
+
+# ---- the browser profile and the sessions ----------------------------------
+# The profile of Chrome holds the session of the account and the history
+# of the browser. It never leaves this machine.
+chrome-profile/
+chrome-profile-*/
+data/chrome-profile/
+data/chrome-profile-*/
+*.chrome-profile
+profile/
+user-data-dir/
+
+# ---- the videos and the images ---------------------------------------------
+# The videos come from the account and from TikTok. They stay here.
+data/originals/
+data/processed/
+data/temp/
+data/previews/
+data/uploads/
+originals/
+processed/
+temp/
+previews/
+uploads/
+*.mp4
+*.webm
+*.mov
+*.m4v
+*.mkv
+*.avi
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.webp
+*.tiff
+*.mp3
+*.wav
+*.m4a
+*.flac
+*.opus
+
+# ---- the runtime state and the cache ---------------------------------------
+# The state holds the cache of the analysis, the results of the discovery
+# and the state of the tasks. It is rebuilt by running the project.
+data/state/
+data/tasks/
+data/review/
+data/production/
+data/screenshots/
+data/test/
+data/*.json
+data/*.log
+data/*.txt
+state/
+*.log
+*.log.*
+logs/
+
+# ---- the models -----------------------------------------------------------
+# The models are large and they are downloaded to the machine that runs
+# them. They stay here.
+models/
+*.onnx
+*.safetensors
+*.pt
+*.pth
+*.tflite
+*.bin
+*.gguf
+
+# ---- the caches of Python -------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# ---- the virtual environments ----------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.python-version
+
+# ---- the tools --------------------------------------------------------------
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+.cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+nosetests.xml
+.hypothesis/
+
+# ---- the editors and the tools of the desk ---------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- the files of this project that hold a live session --------------------
+*.log.err
+*.log.out
+dash-server.err.log
+dash-server.out.log
+chrome-profile-debug-port.txt
+_p15v_*.png
+nohup.out
+
+# ---- the archives ----------------------------------------------------------
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.rar
+*.7z

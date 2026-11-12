@@ -1,0 +1,80 @@
+python_version: "3.13"
+
+allowed_sites:
+  - tiktok.com/tiktokstudio
+
+mode: approve
+schedule:
+  enabled: false
+  daily_time: "09:00"
+ai_provider: gemini
+auto_post: false
+expected_account: "v.quc.on"
+chrome_profile_path: data/chrome-profile
+chrome_channel: chrome
+chrome_executable_path: ""
+
+providers:
+  gemini:
+    enabled: true
+  template:
+    enabled: true
+  meta:
+    enabled: false
+
+discovery:
+  enabled: true
+  resolver: "https://snaptik.app"
+  min_views: 0
+  max_candidates: 20
+  target_topic: "ai music"
+  # The topics the discovery searches for when the admin names none. The
+  # discovery source is the public TikTok keyword search; this list is the
+  # search vocabulary, not a list of accounts.
+  default_topics:
+    - "AI Music"
+    - "AI Song"
+    - "AI Cover"
+    - "AI Remix"
+  # The score thresholds the admin can tune. A score below the accept
+  # threshold is never selected, so a weak video is never used to fill the
+  # result of a run.
+  scoring:
+    accept_score: 70
+    hold_score: 50
+  # The reuse-rights allowlist. It is NOT a discovery source and it does not
+  # limit which videos are searched for. It only decides, after an admin has
+  # approved a video, whether that video may legally be reused.
+  sources:
+    - name: "v.quc.on"
+      creator: "v.quc.on"
+      source: "https://www.tiktok.com/@v.quc.on"
+      type: "own_account"
+      rights: "YES"
+      rights_verified: true
+      permit_date: "2026-11-12"
+      host: "tiktok.com"
+      note: "Ryan's own TikTok account."
+      notes: "Ryan's own TikTok account; reuse permitted with creator credit."
+
+template:
+  fallback_enabled: true
+  topic: "daily tips"
+  topic_keywords: "daily tips,tips,how to"
+  hashtags:
+    - fyp
+    - foryou
+    - viral
+    - trending
+    - dailytips
+    - howto
+    - shorts
+    - tiktok
+    - content
+    - creator
+  banned_words:
+    - spam
+    - scam
+    - hate
+    - slur
+    - nsfw

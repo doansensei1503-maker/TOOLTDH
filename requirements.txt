@@ -1,0 +1,7 @@
+playwright
+apscheduler
+pyyaml
+python-dotenv
+google-genai
+openai
+yt-dlp

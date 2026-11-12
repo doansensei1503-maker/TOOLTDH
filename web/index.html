@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TOOLTDH — TikTok Content AI Assistant</title>
+<link rel="stylesheet" href="/styles.css?v=20261112-1">
+</head>
+<body>
+<div class="app">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">TT</div>
+      <div class="brand-text">
+        <strong>TOOLTDH</strong>
+        <span>TikTok Content AI</span>
+      </div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <button class="nav-item active" data-view="overview"><span class="nav-ico">◱</span>Dashboard</button>
+      <button class="nav-item" data-view="assistant"><span class="nav-ico">✦</span>AI Assistant</button>
+      <button class="nav-item" data-view="discovery"><span class="nav-ico">⌕</span>TikTok Discovery</button>
+      <button class="nav-item" data-view="trends"><span class="nav-ico">◔</span>Trend Analyzer</button>
+      <button class="nav-item" data-view="filter"><span class="nav-ico">▤</span>Video Filter</button>
+      <button class="nav-item" data-view="caption"><span class="nav-ico">✎</span>Caption &amp; Hashtag</button>
+      <button class="nav-item" data-view="videos"><span class="nav-ico">▶</span>Video Manager</button>
+      <button class="nav-item" data-view="editor"><span class="nav-ico">✂</span>Video Editor</button>
+      <button class="nav-item" data-view="approval"><span class="nav-ico">✓</span>Approval Center<span class="badge" id="badge-approval" hidden>0</span></button>
+      <button class="nav-item" data-view="scheduler"><span class="nav-ico">◷</span>Auto Scheduler</button>
+      <button class="nav-item" data-view="studio"><span class="nav-ico">⧉</span>TikTok Studio</button>
+      <button class="nav-item" data-view="analytics"><span class="nav-ico">◹</span>Analytics</button>
+      <button class="nav-item" data-view="history"><span class="nav-ico">≡</span>History &amp; Logs</button>
+      <button class="nav-item" data-view="settings"><span class="nav-ico">⚙</span>Settings &amp; Security</button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="mode-chip" id="mode-chip">mode: —</div>
+      <div class="account-chip" id="account-chip">account: —</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="topbar-left">
+        <h1 id="view-title">Dashboard</h1>
+        <p id="view-sub" class="sub">Trạng thái thật của hệ thống.</p>
+      </div>
+      <div class="topbar-right">
+        <div class="pill" id="stop-pill" hidden>
+          <span class="dot danger"></span>Emergency stop active
+          <button class="btn btn-sm" id="btn-emergency-start">Resume</button>
+        </div>
+        <button class="icon-btn" id="btn-notifications" title="Notifications">
+          ◔<span class="badge" id="badge-notif" hidden>0</span>
+        </button>
+        <button class="btn btn-ghost" id="btn-refresh">Refresh</button>
+        <button class="btn btn-danger" id="btn-emergency">Emergency Stop</button>
+      </div>
+    </header>
+
+    <section class="content" id="content">
+
+      <!-- ============================ OVERVIEW ============================ -->
+      <div class="view" data-view="overview">
+        <div class="stat-grid" id="ov-stats"></div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head">
+              <h3>Blockers đang chặn</h3>
+              <span class="tag tag-warn" id="ov-blocker-count">0</span>
+            </div>
+            <div id="ov-blockers" class="stack"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head">
+              <h3>Lịch chạy tiếp theo</h3>
+              <span class="tag" id="ov-sched-state">—</span>
+            </div>
+            <div id="ov-schedule" class="stack"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Tác vụ gần đây</h3></div>
+          <div class="table-wrap"><table class="table" id="ov-tasks"></table></div>
+        </div>
+      </div>
+
+      <!-- ============================ ASSISTANT =========================== -->
+      <div class="view" data-view="assistant">
+        <div class="card">
+          <div class="card-head">
+            <h3>AI Assistant</h3>
+            <span class="tag">reads real state only</span>
+          </div>
+          <p class="note">
+            Trợ lý đọc trạng thái thật của hệ thống để trả lời các câu hỏi về xu hướng,
+            lý do một video bị chọn hoặc bị loại, và cách xử lý lỗi. Trợ lý không tự
+            tải video và không tự đăng bài.
+          </p>
+          <div class="chat" id="chat-log"></div>
+          <form class="chat-input" id="chat-form">
+            <input id="chat-text" type="text" placeholder="Ví dụ: vì sao video cuối bị loại?" autocomplete="off">
+            <button class="btn btn-primary" type="submit">Send</button>
+          </form>
+          <div class="chip-row">
+            <button class="chip" data-q="Có video nào đủ điều kiện không?">Đủ điều kiện?</button>
+            <button class="chip" data-q="Xu hướng hiện tại của chủ đề đang cấu hình là gì?">Xu hướng</button>
+            <button class="chip" data-q="Có blocker nào cần tôi xử lý không?">Blocker</button>
+            <button class="chip" data-q="Lịch chạy tiếp theo là khi nào?">Lịch chạy</button>
+            <button class="chip" data-q="Video nào đã đăng và kết quả ra sao?">Đã đăng</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================ DISCOVERY =========================== -->
+      <div class="view" data-view="discovery">
+        <div class="card">
+          <div class="card-head">
+            <h3>Cấu hình tìm kiếm</h3>
+            <span class="tag tag-accent" id="disc-status">IDLE</span>
+          </div>
+          <div class="form-grid">
+            <label>Chủ đề / từ khóa
+              <input id="disc-topic" type="text" placeholder="AI Music">
+            </label>
+            <label>Ngôn ngữ
+              <select id="disc-language"><option value="">—</option><option>English</option><option>Vietnamese</option><option>Japanese</option><option>Korean</option></select>
+            </label>
+            <label>Thị trường
+              <input id="disc-market" type="text" placeholder="US">
+            </label>
+            <label>Đăng trong N ngày
+              <input id="disc-days" type="number" min="1" max="365" placeholder="7">
+            </label>
+            <label>Lượt xem tối thiểu
+              <input id="disc-min-views" type="number" min="0" placeholder="100000">
+            </label>
+            <label>Lượt xem tối đa
+              <input id="disc-max-views" type="number" min="0" placeholder="">
+            </label>
+            <label>Lượt thích tối thiểu
+              <input id="disc-min-likes" type="number" min="0" placeholder="0">
+            </label>
+            <label>Bình luận tối thiểu
+              <input id="disc-min-comments" type="number" min="0" placeholder="0">
+            </label>
+            <label>Chia sẻ tối thiểu
+              <input id="disc-min-shares" type="number" min="0" placeholder="0">
+            </label>
+            <label>Thời lượng tối đa (giây)
+              <input id="disc-max-duration" type="number" min="0" placeholder="600">
+            </label>
+            <label class="span-2">Từ khóa bắt buộc
+              <input id="disc-must" type="text" placeholder="ai cover, ai remix">
+            </label>
+            <label class="span-2">Từ khóa loại trừ
+              <input id="disc-exclude" type="text" placeholder="spam, scam">
+            </label>
+          </div>
+          <div class="row">
+            <button class="btn btn-primary" id="btn-discover">Tìm kiếm</button>
+            <button class="btn" id="btn-discover-again" disabled>Tìm kiếm lại</button>
+            <button class="btn" id="btn-discover-resume">Phân tích lại (không tìm kiếm lại)</button>
+            <button class="btn btn-danger" id="btn-discover-stop" disabled>Dừng tìm kiếm</button>
+            <button class="btn" id="btn-save-profile">Lưu cấu hình</button>
+            <select id="disc-profiles" class="select-inline"><option value="">— cấu hình đã lưu —</option></select>
+          </div>
+          <p class="note">
+            Bộ lọc trên được áp dụng lên các chỉ số thật mà nguồn cung cấp.
+            Nếu nguồn không có chỉ số thì hiển thị “Không có dữ liệu”.
+            Mỗi lượt tìm kiếm chỉ chọn tối đa một video tốt nhất.
+          </p>
+        </div>
+
+        <div class="card" id="disc-selected-card" hidden>
+          <div class="card-head">
+            <h3>Video được chọn</h3>
+            <span class="tag tag-ok" id="disc-selected-score">—</span>
+          </div>
+          <div id="disc-selected"></div>
+          <div class="row">
+            <button class="btn btn-primary" id="btn-approve-selected">Duyệt</button>
+            <button class="btn btn-danger" id="btn-reject-selected">Từ chối</button>
+          </div>
+          <p class="note">
+            Chỉ sau khi quản trị viên bấm “Duyệt” thì video mới được tải về, và
+            chỉ khi quyền tái sử dụng được xác minh trong allowlist.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Phân tích AI các ứng viên</h3>
+            <span class="tag" id="disc-analysis-count">0</span>
+          </div>
+          <p class="note">
+            AI đọc nội dung thật của video (khung hình lấy từ chính video đó) và
+            chấm 100 điểm theo 7 tiêu chí: phù hợp AI Music (20), chất lượng
+            nhạc (20), chất lượng hình ảnh (15), sức hút 3 giây &amp; giữ chân
+            (15), tiềm năng tương tác &amp; lan truyền (15), tính sáng tạo (10),
+            phù hợp kênh đích (5). Video không đọc được nội dung được đánh dấu
+            “CHƯA ĐỦ DỮ LIỆU” và không xếp hạng. Lượt xem chỉ là tín hiệu bổ trợ.
+          </p>
+          <div id="disc-analysis" class="stack"></div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Xem trước video</h3>
+            <span class="tag" id="disc-preview-state">—</span>
+          </div>
+          <div class="row">
+            <select id="disc-preview-select" class="select-inline"></select>
+          </div>
+          <div id="disc-preview-box">
+            <div class="empty">Chọn một video để xem trước.</div>
+            <video id="disc-preview-player" controls preload="metadata" hidden></video>
+            <img id="disc-preview-still" alt="Khung hình thật đã đọc từ video" hidden />
+          </div>
+          <p class="note">
+            Bản xem trước phát video đã nằm trên máy này. Khi video chưa được
+            tải, khung hình thật đã đọc từ video được hiện thay, và đó cũng
+            chính là nội dung AI đã phân tích. Hệ thống không tải video chỉ để
+            xem trước.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Kết quả tìm kiếm</h3>
+            <span class="tag" id="disc-count">0 ứng viên</span>
+          </div>
+          <div id="disc-blockers" class="stack"></div>
+          <div class="table-wrap"><table class="table" id="disc-table"></table></div>
+        </div>
+      </div>
+
+      <!-- ============================= TRENDS ============================= -->
+      <div class="view" data-view="trends">
+        <div class="card">
+          <div class="card-head">
+            <h3>Phân tích xu hướng</h3>
+            <span class="tag" id="trend-count">0</span>
+          </div>
+          <p class="note">
+            Điểm xu hướng = chủ đề + lượt xem + tương tác + thời gian đăng + thời lượng,
+            trừ điểm phạt. Mỗi lượt chỉ chọn một video tốt nhất.
+          </p>
+          <div class="table-wrap"><table class="table" id="trend-table"></table></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Video bị loại và lý do</h3></div>
+          <div id="trend-rejected" class="stack"></div>
+        </div>
+      </div>
+
+      <!-- ============================= FILTER ============================= -->
+      <div class="view" data-view="filter">
+        <div class="card">
+          <div class="card-head">
+            <h3>Lọc và chấm điểm</h3>
+            <span class="tag" id="filter-rule">1 video tốt nhất / lượt</span>
+          </div>
+          <p class="note">
+            Mỗi lượt tìm kiếm chỉ chọn tối đa một video tốt nhất. Video trùng lặp, sai
+            chủ đề hoặc không đủ điều kiện bị loại và luôn ghi rõ lý do.
+          </p>
+          <div id="filter-reasons" class="stack"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Khả năng tải &amp; quyền tái sử dụng</h3></div>
+          <div id="filter-eligibility" class="stack"></div>
+        </div>
+      </div>
+
+      <!-- ============================= CAPTION ============================ -->
+      <div class="view" data-view="caption">
+        <div class="card">
+          <div class="card-head"><h3>Caption &amp; Hashtag Studio</h3></div>
+          <label>Task id
+            <input id="cap-task" type="text" placeholder="task id của review">
+          </label>
+          <label>Phong cách
+            <select id="cap-style">
+              <option value="viral">Viral</option>
+              <option value="short">Ngắn gọn</option>
+              <option value="fun">Giải trí</option>
+              <option value="emotional">Cảm xúc</option>
+              <option value="professional">Chuyên nghiệp</option>
+            </select>
+          </label>
+          <div class="row">
+            <button class="btn" id="btn-cap-load">Tải review</button>
+            <button class="btn btn-primary" id="btn-cap-generate">AI tạo caption</button>
+          </div>
+          <div id="cap-body" class="stack"></div>
+          <label>Caption
+            <textarea id="cap-text" rows="3" placeholder="Caption sẽ hiển thị ở đây"></textarea>
+          </label>
+          <label>Hashtags (mỗi dòng một thẻ)
+            <textarea id="cap-tags" rows="3"></textarea>
+          </label>
+          <div class="row">
+            <button class="btn btn-primary" id="btn-cap-save">Lưu caption</button>
+            <span class="tag" id="cap-status">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============================= VIDEOS ============================= -->
+      <div class="view" data-view="videos">
+        <div class="card">
+          <div class="card-head">
+            <h3>Video Library</h3>
+            <span class="tag" id="lib-count">0</span>
+          </div>
+          <p class="note">Video đã tải, đã hash và đã xử lý. Trùng lặp bị chặn bằng SHA256 và URL nguồn.</p>
+          <div class="table-wrap"><table class="table" id="lib-table"></table></div>
+        </div>
+      </div>
+
+      <!-- ============================= EDITOR ============================= -->
+      <div class="view" data-view="editor">
+        <div class="card">
+          <div class="card-head"><h3>Video Editor</h3></div>
+          <p class="note">
+            Cắt và xử lý video dùng chức năng đã có trong <code>ingest.py</code> và
+            <code>poster.py</code>. Trình cắt chạy trong backend, không sửa video trong trình duyệt.
+          </p>
+          <div class="row">
+            <input id="edit-file" type="text" placeholder="Đường dẫn file trong data/originals hoặc data/temp">
+            <input id="edit-start" type="number" min="0" step="0.1" value="0" placeholder="start (s)" class="w-24">
+            <input id="edit-end" type="number" min="0" step="0.1" value="0" placeholder="end (s)" class="w-24">
+            <button class="btn btn-primary" id="btn-edit">Kiểm tra &amp; cắt</button>
+          </div>
+          <pre class="output" id="edit-output">Chưa chạy.</pre>
+        </div>
+      </div>
+
+      <!-- ============================ APPROVAL ============================ -->
+      <div class="view" data-view="approval">
+        <div class="card">
+          <div class="card-head">
+            <h3>Approval Center</h3>
+            <span class="tag" id="appr-count">0</span>
+          </div>
+          <p class="note">
+            Quyền duyệt tải video và quyền duyệt đăng video là hai quyền riêng biệt.
+            Một lần duyệt không đồng nghĩa với cho phép mọi hành động sau đó.
+          </p>
+          <div class="table-wrap"><table class="table" id="appr-table"></table></div>
+        </div>
+      </div>
+
+      <!-- =========================== SCHEDULER ============================ -->
+      <div class="view" data-view="scheduler">
+        <div class="card">
+          <div class="card-head">
+            <h3>Auto Scheduler</h3>
+            <span class="tag" id="sched-state">—</span>
+          </div>
+          <div class="form-grid">
+            <label>Giờ bắt đầu
+              <input id="sched-time" type="time" value="09:00">
+            </label>
+            <label>Tần suất
+              <select id="sched-freq">
+                <option value="daily">Hằng ngày</option>
+                <option value="once">Một lần</option>
+                <option value="custom">Tùy chỉnh</option>
+              </select>
+            </label>
+            <label>Giới hạn lượt tìm kiếm / ngày
+              <input id="sched-limit" type="number" min="1" max="100" value="1">
+            </label>
+            <label>Chủ đề
+              <input id="sched-topic" type="text" placeholder="AI Music">
+            </label>
+            <label class="span-2">Ngày trong tuần
+              <div class="chip-row" id="sched-days">
+                <label class="chip"><input type="checkbox" value="mon">T2</label>
+                <label class="chip"><input type="checkbox" value="tue">T3</label>
+                <label class="chip"><input type="checkbox" value="wed">T4</label>
+                <label class="chip"><input type="checkbox" value="thu">T5</label>
+                <label class="chip"><input type="checkbox" value="fri">T6</label>
+                <label class="chip"><input type="checkbox" value="sat">T7</label>
+                <label class="chip"><input type="checkbox" value="sun">CN</label>
+              </div>
+            </label>
+          </div>
+          <div class="row">
+            <button class="btn btn-primary" id="btn-sched-save">Lưu lịch</button>
+            <button class="btn btn-primary" id="btn-sched-start">Bật lịch</button>
+            <button class="btn" id="btn-sched-run">Chạy một lượt ngay</button>
+            <button class="btn btn-ghost" id="btn-sched-pause">Tạm dừng</button>
+            <span class="tag tag-accent" id="sched-next">—</span>
+          </div>
+          <div class="table-wrap"><table class="table" id="sched-runs"></table></div>
+        </div>
+      </div>
+
+      <!-- ============================= STUDIO ============================= -->
+      <div class="view" data-view="studio">
+        <div class="card">
+          <div class="card-head">
+            <h3>TikTok Studio</h3>
+            <span class="tag" id="studio-account">—</span>
+          </div>
+          <p class="note">
+            Bản nháp chỉ được tạo sau khi được duyệt. Không có nút đăng công khai tự động;
+            <code>auto_post</code> mặc định là <code>false</code>.
+          </p>
+          <div class="table-wrap"><table class="table" id="studio-table"></table></div>
+        </div>
+      </div>
+
+      <!-- =========================== ANALYTICS ============================ -->
+      <div class="view" data-view="analytics">
+        <div class="stat-grid" id="an-stats"></div>
+        <div class="card">
+          <div class="card-head"><h3>Quyết định lọc</h3></div>
+          <div class="table-wrap"><table class="table" id="an-decisions"></table></div>
+        </div>
+      </div>
+
+      <!-- ============================ HISTORY ============================= -->
+      <div class="view" data-view="history">
+        <div class="card">
+          <div class="card-head">
+            <h3>Lịch sử đăng bài</h3>
+            <span class="tag" id="hist-count">0</span>
+          </div>
+          <div class="table-wrap"><table class="table" id="hist-table"></table></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Nhật ký hoạt động</h3></div>
+          <div class="table-wrap"><table class="table" id="log-table"></table></div>
+        </div>
+      </div>
+
+      <!-- ============================ SETTINGS ============================ -->
+      <div class="view" data-view="settings">
+        <div class="card">
+          <div class="card-head"><h3>Cấu hình</h3></div>
+          <div class="form-grid">
+            <label>Chế độ
+              <select id="set-mode">
+                <option value="approve">Approval mode (mặc định)</option>
+                <option value="automation">Automation mode</option>
+              </select>
+            </label>
+            <label>auto_post
+              <select id="set-autopost">
+                <option value="false">false (không tự đăng)</option>
+                <option value="true">true</option>
+              </select>
+            </label>
+          </div>
+          <button class="btn btn-primary" id="btn-set-save">Lưu cấu hình</button>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Quyền &amp; bảo mật</h3></div>
+          <div id="sec-allowlist" class="stack"></div>
+          <p class="note warn">
+            Quyền truy cập nguồn và ngày giấy phép không sửa được từ dashboard.
+            Một quyền không bao giờ được mở rộng qua giao diện.
+          </p>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h3>Search profiles</h3></div>
+          <div class="table-wrap"><table class="table" id="prof-table"></table></div>
+        </div>
+      </div>
+
+    </section>
+  </main>
+</div>
+
+<div class="drawer" id="notif-drawer" hidden>
+  <div class="drawer-head">
+    <h3>Notifications</h3>
+    <button class="icon-btn" id="btn-notif-close">✕</button>
+  </div>
+  <div id="notif-list" class="stack"></div>
+</div>
+
+<div class="modal" id="video-modal" hidden>
+  <div class="modal-box">
+    <div class="drawer-head">
+      <h3 id="video-modal-title">Chi tiết video</h3>
+      <button class="icon-btn" id="btn-video-close">✕</button>
+    </div>
+    <div id="video-modal-body" class="stack"></div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toasts"></div>
+
+<script src="/app.js?v=20261112-1"></script>
+</body>
+</html>
