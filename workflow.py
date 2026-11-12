@@ -542,42 +542,54 @@ def run_workflow(
         log(f"REJECTED: {exc}")
         return WorkflowResult(status="REJECTED", reason=str(exc), steps=steps)
 
+    snaptik_info: dict[str, Any] = {}
+    link = ""
+    direct_ok = False
     try:
         link = _resolve_candidate_media_link(selected, fetch_text)
+        direct_ok = True
     except (DiscoveryError, OSError) as exc:
-        log(f"FAILED: {exc}")
-        return WorkflowResult(
-            status="FAILED",
-            reason=str(exc),
-            task_id=task_id,
-            source_url=selected.source_url,
-            creator=selected.creator,
-            steps=steps,
-        )
+        # The page-text resolver found no direct media link. When reuse
+        # rights are verified the SnapTik acquisition (isolated session,
+        # no TikTok cookies) is tried as the media-acquisition path;
+        # Discovery itself is untouched.
+        if not reuse_permitted:
+            log(f"FAILED: {exc}")
+            return WorkflowResult(
+                status="FAILED",
+                reason=str(exc),
+                task_id=task_id,
+                source_url=selected.source_url,
+                creator=selected.creator,
+                steps=steps,
+            )
+        log(f"resolver found no direct link ({exc}); trying SnapTik acquisition")
 
-    eligibility = check_candidate(
-        selected,
-        media_url=link,
-        reuse_permitted=reuse_permitted,
-        reuse_reason=reuse_reason,
-    )
-    if not eligibility.eligible:
-        reason = "Rejected: the video is not eligible for download: " + "; ".join(
-            eligibility.reasons
+    temp_path: Path | None = None
+    if direct_ok:
+        eligibility = check_candidate(
+            selected,
+            media_url=link,
+            reuse_permitted=reuse_permitted,
+            reuse_reason=reuse_reason,
         )
-        log(f"REJECTED: {reason}")
-        return WorkflowResult(
-            status="REJECTED",
-            reason=reason,
-            task_id=task_id,
-            source_url=selected.source_url,
-            creator=selected.creator,
-            steps=steps,
+        if not eligibility.eligible:
+            reason = "Rejected: the video is not eligible for download: " + "; ".join(
+                eligibility.reasons
+            )
+            log(f"REJECTED: {reason}")
+            return WorkflowResult(
+                status="REJECTED",
+                reason=reason,
+                task_id=task_id,
+                source_url=selected.source_url,
+                creator=selected.creator,
+                steps=steps,
+            )
+        log(
+            f"eligible for download: {selected.source_url} host={eligibility.media_host} "
+            f"(reuse {reuse_reason})"
         )
-    log(
-        f"eligible for download: {selected.source_url} host={eligibility.media_host} "
-        f"(reuse {reuse_reason})"
-    )
 
     # A video that was already downloaded and processed is not downloaded
     # again, so a repeated run never re-posts the same content.
@@ -599,7 +611,34 @@ def run_workflow(
         )
 
     try:
-        temp_path = download_to_temp(link, task_id, fetch_bytes, referer=selected.source_url)
+        if direct_ok:
+            temp_path = download_to_temp(link, task_id, fetch_bytes, referer=selected.source_url)
+        else:
+            # SnapTik acquisition: isolated session, no TikTok cookies.
+            # Rights were verified above; without them this branch is dead.
+            from snaptik import SnapTikError, download_snaptik, inspect_media
+
+            try:
+                acquired = download_snaptik(selected.source_url, task_id)
+                snaptik_info = inspect_media(acquired)
+            except SnapTikError as exc:
+                log(f"FAILED: {exc}")
+                return WorkflowResult(
+                    status="FAILED",
+                    reason=str(exc),
+                    task_id=task_id,
+                    source_url=selected.source_url,
+                    creator=selected.creator,
+                    steps=steps,
+                )
+            log(
+                "snaptik acquired: "
+                f"{snaptik_info.get('mime', '')} {snaptik_info.get('size_bytes', 0)}B "
+                f"{snaptik_info.get('codec', '')} {snaptik_info.get('resolution', '')} "
+                f"{float(snaptik_info.get('duration_seconds', 0) or 0):.2f}s "
+                f"sha256={str(snaptik_info.get('sha256', ''))[:16]}"
+            )
+            temp_path = acquired
     except (DiscoveryError, OSError) as exc:
         log(f"FAILED: {exc}")
         return WorkflowResult(
@@ -637,6 +676,28 @@ def run_workflow(
         )
     metadata["title"] = selected.title or metadata.get("title") or task_id
     metadata["topic"] = selected.topic or metadata.get("topic", "")
+    # Keep the origin visible: the Library/file metadata carries the TikTok
+    # source URL, the creator, and the reuse rights alongside the temp path.
+    # Nothing about the source is wiped.
+    metadata["source_url"] = selected.source_url
+    metadata["creator"] = selected.creator
+    metadata["reuse_reason"] = reuse_reason
+    metadata["acquisition"] = "snaptik" if not direct_ok else "direct"
+    if snaptik_info:
+        metadata["acquisition_info"] = snaptik_info
+    try:
+        from storage import load_library, save_library
+
+        _lib = load_library(library.path)
+        _entry = _lib.get("hashes", {}).get(digest)
+        if isinstance(_entry, dict):
+            _entry.setdefault("source_url", selected.source_url)
+            _entry.setdefault("creator", selected.creator)
+            _entry.setdefault("rights", reuse_reason)
+            _entry.setdefault("acquisition", metadata["acquisition"])
+            save_library(_lib, library.path)
+    except Exception:
+        pass
     # P16: the measured duration is the only duration that is trusted. The
     # declared duration from a candidate record is never used as the value.
     measured_duration = metadata.get("duration_seconds")
