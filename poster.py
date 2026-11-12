@@ -2072,6 +2072,88 @@ def wait_for_save_draft_enabled(
     return False
 
 
+def find_publish_button(page: Any) -> Any | None:
+    """Return the exact Post/Publish control on the Studio upload page.
+
+    The old broad ``post|publish`` first-match selector hits the "Posts"
+    navigation tab, so the flow left the video in Drafts without ever
+    pressing the real publish control. This helper only accepts a button
+    whose accessible text is exactly "Post" or "Publish" (case-insensitive),
+    visible and enabled, on the ``/tiktokstudio/upload`` page. Anything
+    else returns None so the caller records a precise blocker instead of
+    clicking the wrong control.
+    """
+    try:
+        current = str(page.url or "")
+    except Exception:
+        current = ""
+    if "tiktokstudio/upload" not in current.lower():
+        return None
+    for exact in (r"^\s*post\s*$", r"^\s*publish\s*$"):
+        try:
+            loc = page.get_by_role("button", name=re.compile(exact, re.I))
+            count = int(loc.count())
+        except Exception:
+            continue
+        for index in range(min(count, 10)):
+            try:
+                el = loc.nth(index)
+                try:
+                    label = str(el.inner_text(timeout=3000) or "").strip()
+                except Exception:
+                    label = ""
+                if label.lower() not in {"post", "publish"}:
+                    continue
+                try:
+                    if not el.is_visible():
+                        continue
+                except Exception:
+                    pass
+                try:
+                    if not el.is_enabled():
+                        continue
+                except Exception:
+                    pass
+                return el
+            except Exception:
+                continue
+    return None
+
+
+def confirm_publish_dialog(page: Any, log: Callable[[str], None] = print) -> bool:
+    """Press the exact confirm control if Studio shows a publish dialog.
+
+    Returns True when no dialog blocks the flow (either none appeared or
+    its confirm control was pressed). Returns False when a dialog is open
+    but has no exact Post/Publish confirm control, so the caller stops
+    instead of guessing.
+    """
+    try:
+        dialogs = page.get_by_role("dialog")
+        if int(dialogs.count()) == 0:
+            return True
+    except Exception:
+        return True
+    for exact in (r"^\s*post\s*$", r"^\s*publish\s*$", r"^\s*confirm\s*$", r"^\s*done\s*$"):
+        try:
+            loc = page.get_by_role("button", name=re.compile(exact, re.I))
+            if int(loc.count()) == 0:
+                continue
+            el = loc.first
+            try:
+                if not el.is_visible() or not el.is_enabled():
+                    continue
+            except Exception:
+                pass
+            el.click()
+            log(f"publish confirmation dialog confirmed with {exact!r}")
+            return True
+        except Exception:
+            continue
+    log("publish confirmation dialog is open without an exact confirm control; stopping")
+    return False
+
+
 def current_draft_reference(page: Any) -> str:
     """Return the current page URL as the draft reference."""
     try:
@@ -2757,7 +2839,7 @@ def post_to_tiktok_studio(
                 return blocked_result(blocked)
             delay(random_source(3.0, 8.0))
 
-        post_button = page.get_by_role("button", name=re.compile("post|publish", re.I)).first
+        post_button = None
         if mode == "approve":
             save_draft = page.get_by_role("button", name=re.compile("save draft", re.I)).first
             if save_draft.count() > 0:
@@ -2848,6 +2930,31 @@ def post_to_tiktok_studio(
             "PUBLISH",
             "auto mode publishes only after approval and the caption is written",
         )
+        post_button = find_publish_button(page)
+        if post_button is None:
+            reason = (
+                "The exact Post/Publish control was not found or not enabled on "
+                "the TikTok Studio upload page, so nothing was clicked and the "
+                "video stays a draft instead of being published."
+            )
+            log(f"NOT PUBLISHED: {reason}")
+            state = save_task_state(
+                task_id,
+                "FAILED_RETRYABLE",
+                caption,
+                str(video_path),
+                reason,
+                state_path,
+                {"mode": mode},
+            )
+            return PosterResult(
+                task_id=task_id,
+                status="FAILED_RETRYABLE",
+                caption=caption,
+                video_path=str(video_path),
+                message=reason,
+                state=state,
+            )
         post_button.click()
         delay(random_source(3.0, 8.0))
         blocked = detect_block(page)
@@ -2855,6 +2962,29 @@ def post_to_tiktok_studio(
             if not handle_block(blocked):
                 return blocked_result(blocked)
             delay(random_source(3.0, 8.0))
+        if not confirm_publish_dialog(page, log=log):
+            reason = (
+                "A publish confirmation dialog is open and requires a user "
+                "decision, so the publish was not completed."
+            )
+            log(f"NOT CONFIRMED: {reason}")
+            state = save_task_state(
+                task_id,
+                "FAILED_RETRYABLE",
+                caption,
+                str(video_path),
+                reason,
+                state_path,
+                {"mode": mode},
+            )
+            return PosterResult(
+                task_id=task_id,
+                status="FAILED_RETRYABLE",
+                caption=caption,
+                video_path=str(video_path),
+                message=reason,
+                state=state,
+            )
 
         # The publish is only PUBLISHED when the platform confirms it. The
         # address of the post that was published is looked for in the
@@ -3002,6 +3132,7 @@ __all__ = [
     "SAVE_DRAFT_ENABLE_TIMEOUT_MS",
     "capture_error_screenshot",
     "cdp_endpoint_alive",
+    "confirm_publish_dialog",
     "chrome_pid_for_port",
     "chrome_processes_for_profile",
     "current_draft_reference",
@@ -3011,6 +3142,7 @@ __all__ = [
     "detect_block",
     "detect_robot_check",
     "fill_description",
+    "find_publish_button",
     "find_real_chrome",
     "get_page_and_context",
     "is_expected_account",
