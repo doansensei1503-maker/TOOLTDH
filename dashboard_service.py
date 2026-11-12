@@ -2039,6 +2039,63 @@ def p1_search(
             "funnel": result["funnel"], "queries": result["queries"]}
 
 
+# ---------------------------------------------------------------- P2 video lab
+
+
+def p2_video_detail(project_id: str = "", run_id: str = "", video_id: str = "") -> dict[str, Any]:
+    """Video Lab detail from P1 SQLite (offline, no network)."""
+    import p2_lab as _lab
+
+    if not str(project_id or "").strip() or not str(run_id or "").strip() or not str(video_id or "").strip():
+        raise ServiceError("project_id, run_id and video_id are required.")
+    try:
+        return {"video": _lab.video_detail(project_id, run_id, video_id)}
+    except KeyError as exc:
+        raise ServiceError(str(exc))
+
+
+def p2_video_analyze(project_id: str = "", run_id: str = "", video_id: str = "",
+                     local_path: str = "") -> dict[str, Any]:
+    """Analyze one downloaded/imported MP4 (measured data, cached). No AI."""
+    import p2_lab as _lab
+
+    if not str(video_id or "").strip():
+        raise ServiceError("video_id is required.")
+    asset = _lab.get_asset(str(video_id))
+    path = str(local_path or "").strip() or str((asset or {}).get("local_path", ""))
+    if not path:
+        raise ServiceError("Video chưa được tải/import nên chưa phân tích được.")
+    try:
+        return {"analysis": _lab.analyze_media(path)}
+    except FileNotFoundError as exc:
+        raise ServiceError(str(exc))
+    except RuntimeError as exc:
+        raise ServiceError(str(exc))
+
+
+def p2_auto_download(project_id: str = "", run_id: str = "",
+                     media_map: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Auto Download Best: pick best permitted video, download only it."""
+    import p2_lab as _lab
+
+    if not str(project_id or "").strip() or not str(run_id or "").strip():
+        raise ServiceError("project_id and run_id are required.")
+    mmap = {str(k): str(v) for k, v in (dict(media_map or {}).items())}
+    return _lab.auto_download_best(project_id, run_id, media_map=mmap)
+
+
+def p2_settings_get() -> dict[str, Any]:
+    import p2_lab as _lab
+
+    return _lab.settings_get()
+
+
+def p2_settings_set(enabled: bool = False) -> dict[str, Any]:
+    import p2_lab as _lab
+
+    return _lab.settings_set(bool(enabled))
+
+
 # ---------------------------------------------------------------- review
 
 

@@ -48,6 +48,11 @@ def _route(method: str, path: str) -> Callable[..., Any] | None:
         ("GET", "/api/p1/runs"): service.p1_runs_list,
         ("GET", "/api/p1/run"): service.p1_run_get,
         ("POST", "/api/p1/search"): service.p1_search,
+        ("GET", "/api/p2/video"): service.p2_video_detail,
+        ("POST", "/api/p2/video/analyze"): service.p2_video_analyze,
+        ("POST", "/api/p2/auto-download"): service.p2_auto_download,
+        ("GET", "/api/p2/settings"): service.p2_settings_get,
+        ("POST", "/api/p2/settings"): service.p2_settings_set,
         ("GET", "/api/reviews"): service.review_list,
         ("POST", "/api/reviews/select"): service.select_review_candidate,
         ("POST", "/api/reviews/caption"): service.update_review_caption,
@@ -314,6 +319,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 kwargs["project_id"] = query["project_id"][0]
             if "run_id" in query:
                 kwargs["run_id"] = query["run_id"][0]
+            if "video_id" in query:
+                kwargs["video_id"] = query["video_id"][0]
             payload = handler(**kwargs)
         except ApiError as exc:
             self._send_json({"error": str(exc)}, 400)

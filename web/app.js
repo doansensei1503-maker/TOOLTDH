@@ -1738,6 +1738,9 @@ async function bindP1() {
     el("btn-p1-open").addEventListener("click", p1Open);
     el("p1-project").addEventListener("change", (e) => { p1state.projectId = e.target.value; p1state.runId = ""; loadP1Runs(); });
     el("p1-run").addEventListener("change", (e) => { p1state.runId = e.target.value; });
+    if (el("btn-p2-detail")) el("btn-p2-detail").addEventListener("click", p2Detail);
+    if (el("btn-p2-analyze")) el("btn-p2-analyze").addEventListener("click", p2Analyze);
+    if (el("btn-p2-download")) el("btn-p2-download").addEventListener("click", p2Download);
   } catch (_) { /* workspace optional */ }
   await loadP1Projects();
 }
@@ -1828,9 +1831,94 @@ async function p1Open() {
     state.top5 = top5;
     state.funnel = funnel;
     renderTop5();
+    await loadP2Videos(run);
     toast("Đã mở " + (run.version || "") + " offline (không gọi TikTok).", "ok");
   } catch (e) { toast(e.message, "err"); }
 }
+
+/* ------------------------------------------------ P2 video lab */
+
+async function loadP2Videos(run) {
+  const sel = el("p2-video");
+  if (!sel) return;
+  const vids = (run && run.videos) || [];
+  if (!vids.length) { sel.innerHTML = "<option value=''>—</option>"; return; }
+  sel.innerHTML = vids.map((v) =>
+    "<option value='" + esc(v.id) + "'>#" + (v.rank || "-") + " · @" + esc(v.creator || "") +
+    " · " + (v.score || 0) + "đ · " + esc(v.rights || "?") + "</option>").join("");
+  try {
+    const s = await api("/p2/settings");
+    el("p2-auto").value = (s && s.auto_download_best) ? "on" : "off";
+    const st = el("p2-lab-state");
+    if (st) st.textContent = (s && s.auto_download_best) ? "AUTO ON" : "AUTO OFF";
+  } catch (_) { /* ignore */ }
+}
+
+async function p2Detail() {
+  const vid = el("p2-video").value || "";
+  if (!p1state.projectId || !p1state.runId || !vid) { toast("Chọn project/run/video.", "err"); return; }
+  try {
+    const res = await api("/p2/video?project_id=" + encodeURIComponent(p1state.projectId) +
+      "&run_id=" + encodeURIComponent(p1state.runId) + "&video_id=" + encodeURIComponent(vid));
+    const v = res.video || {};
+    el("p2-lab-state").textContent = "rank #" + (v.rank || "-");
+    el("p2-lab-out").innerHTML = "<dl class='kv'>" +
+      "<dt>URL</dt><dd><a href='" + esc(v.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>" + esc(v.source_url) + "</a></dd>" +
+      "<dt>Creator</dt><dd>" + esc(v.creator || "—") + "</dd>" +
+      "<dt>Metrics</dt><dd>" + num(v.views) + " views · " + num(v.likes) + " likes · " + (v.duration || 0) + "s</dd>" +
+      "<dt>Trend score</dt><dd><strong>" + (v.score || 0) + "</strong></dd>" +
+      "<dt>Reason</dt><dd>" + esc(v.reason || "—") + "</dd>" +
+      "<dt>Rights</dt><dd>" + esc(v.rights_status || "—") + "</dd></dl>";
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function p2Analyze() {
+  const vid = el("p2-video").value || "";
+  if (!p1state.projectId || !p1state.runId || !vid) { toast("Chọn project/run/video.", "err"); return; }
+  try {
+    toast("Đang đo MP4 thật…", "");
+    const res = await api("/p2/video/analyze", { method: "POST",
+      body: JSON.stringify({ project_id: p1state.projectId, run_id: p1state.runId, video_id: vid }) });
+    const a = res.analysis || {};
+    const sb = (a.storyboard || []).map((s) =>
+      "<div class='muted'>@" + s.t + "s · " + s.bytes + " bytes · " + esc(s.image) + "</div>").join("");
+    el("p2-lab-out").innerHTML = "<dl class='kv'>" +
+      "<dt>Duration</dt><dd>" + (a.duration || 0).toFixed(2) + "s (đo thật)</dd>" +
+      "<dt>FPS/Res</dt><dd>" + esc(String(a.fps || "—")) + " · " + (a.width || "?") + "x" + (a.height || "?") + " · " + esc(a.vcodec || "") + "</dd>" +
+      "<dt>Audio</dt><dd>" + (a.audio && a.audio.has_audio ? ("có · " + esc(String(a.audio.codec || "")) + " · mean " + esc(String(a.audio.mean_volume_db)) + "dB · peak " + esc(String(a.audio.peak_volume_db)) + "dB") : "không có track") + (a.cache_hit ? " · CACHE" : "") + "</dd>" +
+      "<dt>Scenes</dt><dd>" + ((a.scenes || []).join(", ") || "—") + " (" + (a.scenes || []).length + " điểm cắt đo thật)</dd>" +
+      "<dt>SHA256</dt><dd>" + esc(String(a.sha256 || "").slice(0, 24)) + "… · " + esc(a.analyzer_version || "") + "</dd></dl>" +
+      "<div><strong>Storyboard (" + (a.storyboard || []).length + " keyframes)</strong>" + sb + "</div>";
+    toast(a.cache_hit ? "Đã lấy từ cache (không phân tích lại)." : "Đã đo xong MP4.", "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function p2Download() {
+  if (!p1state.projectId || !p1state.runId) { toast("Chọn project và run.", "err"); return; }
+  try {
+    const on = el("p2-auto").value === "on";
+    await api("/p2/settings", { method: "POST", body: JSON.stringify({ enabled: on }) });
+    const st = el("p2-lab-state");
+    if (st) st.textContent = on ? "AUTO ON" : "AUTO OFF";
+    toast("Đang chọn video đủ quyền điểm cao nhất (chỉ 1)…", "");
+    const res = await api("/p2/auto-download", { method: "POST",
+      body: JSON.stringify({ project_id: p1state.projectId, run_id: p1state.runId }) });
+    if ((res.status || "") === "RIGHTS_REQUIRED") {
+      el("p2-lab-out").innerHTML = "<div class='notif'><div class='notif-kind'>RIGHTS_REQUIRED</div><div class='notif-msg'>" +
+        esc(res.reason || "") + " · đã bỏ qua " + (res.skipped || []).length + " video không quyền, không tải video nào.</div></div>";
+      toast("RIGHTS_REQUIRED: không tải video trái phép.", "err");
+      return;
+    }
+    el("p2-lab-out").innerHTML = "<dl class='kv'>" +
+      "<dt>Trạng thái</dt><dd>" + esc(res.status || "") + (res.duplicate ? " · KHÔNG TRÙNG (cache/library)" : "") + "</dd>" +
+      "<dt>Video</dt><dd>" + esc(res.source_url || "") + " · " + (res.chosen_score || 0) + "đ</dd>" +
+      "<dt>File</dt><dd>" + esc(res.local_path || "") + "</dd>" +
+      "<dt>Bỏ qua</dt><dd>" + (res.skipped || []).length + " video không quyền</dd></dl>";
+    toast(res.status === "DOWNLOADED" ? "Đã tải 1 video tốt nhất." : "Đã xử lý (không trùng): " + (res.status || ""), res.status === "DOWNLOAD_FAILED" ? "err" : "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+const _bindP1orig = typeof bindP1 !== "undefined" ? bindP1 : null;
 
 // The hash can change without a click, for example when the browser restores
 // a previous view or the user edits the address.

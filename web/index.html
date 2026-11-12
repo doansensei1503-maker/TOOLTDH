@@ -279,6 +279,28 @@
           <p class="note">Tối đa 5 video tốt nhất, không cố lấp đủ 5. Chỉ video đủ điều kiện mới có nút “Xếp hàng”.</p>
           <div id="disc-top5" class="stack"></div>
         </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Video Lab (P2)</h3>
+            <span class="tag" id="p2-lab-state">—</span>
+          </div>
+          <div class="form-grid">
+            <label>Video trong run
+              <select id="p2-video" class="select-inline"></select>
+            </label>
+            <label>Auto Download Best
+              <select id="p2-auto" class="select-inline"><option value="off">OFF</option><option value="on">ON</option></select>
+            </label>
+          </div>
+          <div class="row">
+            <button class="btn" id="btn-p2-detail">Xem chi tiết</button>
+            <button class="btn" id="btn-p2-analyze">Phân tích MP4</button>
+            <button class="btn btn-primary" id="btn-p2-download">Auto Download Best (chỉ 1 video)</button>
+          </div>
+          <div id="p2-lab-out" class="stack"><div class="empty">Chọn run ở Project Workspace, rồi chọn video để xem Lab.</div></div>
+          <p class="note">Lab chỉ đo thật bằng FFprobe/FFmpeg (duration, fps, resolution, audio, scene, storyboard). Không bịa nội dung cảnh hay lời thoại. Tải chỉ 1 video đủ quyền điểm cao nhất.</p>
+        </div>
       </div>
 
       <!-- ============================= TRENDS ============================= -->
