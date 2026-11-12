@@ -856,6 +856,27 @@ def run_workflow(
     original_path = ensure_original(temp_path, task_id)
     cleanup_result = cleanup_task(temp_path)
     log(f"published and cleaned temp: {len(cleanup_result['temp'])} file(s) removed")
+
+    # The confirmed publish is written to the state of the task, so a
+    # later run never posts the same video again and the retention pass
+    # can find the task and its post address seven days later.
+    record_workflow_state(
+        task_id,
+        "PUBLISHED",
+        f"Published and confirmed: {posted_url}",
+        {
+            "source_url": selected.source_url,
+            "creator": selected.creator,
+            "caption": caption,
+            "hashtags": hashtags,
+            "sha256": digest,
+            "temp_path": str(temp_path),
+            "original_path": str(original_path),
+            "draft_reference": draft_reference,
+            "posted_url": posted_url,
+            "provider": result.provider,
+        },
+    )
     return WorkflowResult(
         status="PUBLISHED",
         task_id=task_id,

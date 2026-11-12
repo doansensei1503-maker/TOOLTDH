@@ -120,8 +120,7 @@ class TemplateProvider:
         # was measured, the caption is the topic and the title.
         measured = measured_content_facts(metadata)
         caption = " - ".join(part for part in (measured, source_name, self.topic) if part).strip()
-        if len(caption) > MAX_CAPTION_LENGTH:
-            caption = caption[:MAX_CAPTION_LENGTH].rstrip()
+        caption = fit_caption(caption)
         hashtags = self.hashtags[:MAX_HASHTAGS]
         score, reasons = self.score(caption, hashtags, metadata)
         return {
@@ -283,9 +282,40 @@ def build_content_caption(
     text = " - ".join(part for part in parts if part).strip()
     if creator_credit:
         text = f"{text} - {creator_credit}"
-    if len(text) > MAX_CAPTION_LENGTH:
-        text = text[:MAX_CAPTION_LENGTH].rstrip()
-    return text
+    return fit_caption(text, creator_credit)
+
+
+def fit_caption(text: str, creator_credit: str = "") -> str:
+    """Cut a caption to the limit while the credit always stays in it.
+
+    The credit names the origin of the content, so it is never cut away.
+    When the caption is too long, the middle part is shortened and the
+    credit and the first words stay. The measured facts stay too, so the
+    caption still says what the machine really read.
+    """
+    text = text.strip()
+    if len(text) <= MAX_CAPTION_LENGTH:
+        return text
+
+    credit = creator_credit.strip()
+    if not credit:
+        return text[:MAX_CAPTION_LENGTH].rstrip()
+
+    # The credit and the measured facts are kept, and the title in the
+    # middle is what gets shortened. The origin and the real content of
+    # the video never get cut away.
+    parts = [part.strip() for part in text.split(" - ") if part.strip()]
+    if parts and parts[-1] == credit:
+        parts = parts[:-1]
+    else:
+        # The credit is somewhere in the caption already. It is kept and
+        # the other parts are shortened around it.
+        parts = [part for part in parts if part != credit]
+    keep = MAX_CAPTION_LENGTH - len(credit) - 3
+    if keep < 0:
+        return credit[:MAX_CAPTION_LENGTH].rstrip()
+    body = " - ".join(parts)
+    return f"{body[:keep].rstrip()} - {credit}"
 
 
 def measured_content_facts(metadata: dict[str, Any]) -> str:

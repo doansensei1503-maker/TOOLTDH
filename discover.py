@@ -719,11 +719,22 @@ def build_caption(video: DiscoveredVideo, base_caption: str) -> str:
     credit = creator_credit(video)
     # The credit is added once. When the analysis already carried it the
     # caption is not changed, so the origin stays visible exactly once.
-    if credit and credit.lower() not in base.lower():
+    # The handle is looked for too, because the analysis and this
+    # function may write the credit in a different wording.
+    handle = video.creator.strip().lstrip("@").lower()
+    already = bool(credit) and (
+        credit.lower() in base.lower()
+        or (handle and handle in base.lower())
+    )
+    if credit and not already:
         parts.append(credit)
     text = " - ".join(parts).strip()
+    # The credit names the origin of the content, so it is never cut away.
+    # When the caption is too long, the title is shortened instead.
     if len(text) > 150:
-        text = text[:150].rstrip()
+        from brain import fit_caption
+
+        return fit_caption(text, credit)
     return text
 
 

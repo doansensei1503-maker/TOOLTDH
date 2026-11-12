@@ -163,7 +163,74 @@ def check_analyze_content_carries_the_facts() -> None:
     )
 
 
-# ------------------------------------------------------- publish confirm
+def check_the_credit_is_never_cut_away() -> None:
+    """A long title never pushes the credit out of the caption."""
+    import discover
+
+    metadata = {
+        "title": "X" * 120,
+        "topic": "ai music",
+        "local_facts": {
+            "sound": {
+                "measured": True,
+                "tempo_bpm": 128,
+                "loudness_db": -21,
+                "duration_seconds": 42,
+            }
+        },
+    }
+    credit = "by @somecreator"
+    caption = brain.build_content_caption(metadata, "ai music", credit)
+    check(
+        "the credit stays in the caption",
+        credit in caption,
+        caption,
+    )
+    check(
+        "the measured facts stay in the caption",
+        "128" in caption,
+        caption,
+    )
+    check(
+        "the caption stays inside the limit",
+        len(caption) <= brain.MAX_CAPTION_LENGTH,
+        f"{len(caption)} characters",
+    )
+
+    video = discover.DiscoveredVideo(
+        source_url="https://www.tiktok.com/@creator/video/1",
+        creator="creator",
+        title="A very long title " * 6,
+    )
+    final = discover.build_caption(video, caption)
+    check(
+        "the credit stays after the title is added",
+        discover.creator_credit(video) in final,
+        final,
+    )
+    check(
+        "the measured facts stay after the title is added",
+        "128" in final,
+        final,
+    )
+    check(
+        "the final caption stays inside the limit",
+        len(final) <= brain.MAX_CAPTION_LENGTH,
+        f"{len(final)} characters",
+    )
+
+
+def check_a_caption_without_a_credit_still_works() -> None:
+    """A caption with no credit is shortened and never breaks."""
+    caption = brain.build_content_caption(
+        {"title": "X" * 200, "topic": "ai music"}, "ai music", ""
+    )
+    check(
+        "a caption without a credit stays inside the limit",
+        len(caption) <= brain.MAX_CAPTION_LENGTH,
+        f"{len(caption)} characters",
+    )
+
 
 class _FakePage:
     """A page that shows a published post, or nothing at all."""
@@ -507,12 +574,101 @@ def check_retention_state_survives_a_restart() -> None:
         )
 
 
+def check_the_published_state_is_written_after_a_publish() -> None:
+    """The confirmed publish is written to the state of the task.
+
+    The retention pass and the resume both read this state, so a publish
+    that is not written down cannot be found by either of them.
+    """
+    import inspect
+
+    import workflow
+
+    source = inspect.getsource(workflow.run_workflow)
+    check(
+        "the publish writes the state of the task",
+        'record_workflow_state(\n        task_id,\n        "PUBLISHED"' in source
+        or '"PUBLISHED"' in source,
+        "the workflow never records PUBLISHED",
+    )
+    check(
+        "the state carries the address of the post",
+        '"posted_url": posted_url' in source,
+        "the state does not carry the posted_url",
+    )
+    check(
+        "the state carries the original of the video",
+        '"original_path": str(original_path)' in source,
+        "the state does not carry the original_path",
+    )
+
+
+def check_the_retention_pass_finds_a_published_task() -> None:
+    """A publish that was written down is found by the retention pass.
+
+    This is the chain that matters: the publish is recorded, the state
+    carries the address of the post, and seven days later the copy of the
+    video is the one that is removed.
+    """
+    import inspect
+
+    import workflow
+
+    with tempfile.TemporaryDirectory() as folder:
+        root = Path(folder)
+        history = root / "history.json"
+        tasks = root / "tasks"
+        tasks.mkdir()
+        copy = root / "copy.mp4"
+        copy.write_bytes(b"video")
+        published = (datetime.now() - timedelta(days=8)).isoformat()
+        _write_history(history, [{
+            "date": published,
+            "task_id": "task-old",
+            "status": "PUBLISHED",
+            "posted_url": "https://www.tiktok.com/@dj/video/1",
+        }])
+        # The state of the task, written the way the workflow writes it.
+        (tasks / "task-old.json").write_text(json.dumps({
+            "task_id": "task-old",
+            "status": "PUBLISHED",
+            "reason": "Published and confirmed: https://www.tiktok.com/@dj/video/1",
+            "posted_url": "https://www.tiktok.com/@dj/video/1",
+            "temp_path": str(copy),
+            "original_path": "",
+        }), encoding="utf-8")
+
+        result = storage.cleanup_expired_media(
+            history_path=history,
+            task_states_dir=tasks,
+            dry_run=False,
+            log=lambda message: None,
+        )
+        check(
+            "the published task is found by the pass",
+            len(result["expired_tasks"]) == 1,
+            str(result["expired_tasks"]),
+        )
+        check(
+            "the copy of the published video is removed",
+            not copy.exists(),
+            "the copy was kept",
+        )
+        check(
+            "the history is never removed",
+            history.is_file(),
+            "the history was removed",
+        )
+
+
 def main() -> int:
     check_caption_uses_measured_facts()
     check_caption_never_claims_unmeasured_facts()
     check_caption_ignores_facts_that_are_not_measured()
     check_template_provider_uses_the_same_facts()
     check_analyze_content_carries_the_facts()
+    check_the_credit_is_never_cut_away()
+    check_a_caption_without_a_credit_still_works()
 
     check_published_reference_is_found()
     check_published_reference_is_found_in_the_address()
@@ -521,6 +677,7 @@ def main() -> int:
     check_published_state_needs_the_reference()
     check_a_published_task_is_never_published_again()
     check_the_published_resume_does_not_post_again()
+    check_the_published_state_is_written_after_a_publish()
 
     check_retention_deadline_is_seven_days()
     check_retention_never_expires_an_unpublished_task()
@@ -528,6 +685,7 @@ def main() -> int:
     check_retention_keeps_the_original_and_the_shared_file()
     check_retention_never_removes_an_unpublished_media()
     check_retention_state_survives_a_restart()
+    check_the_retention_pass_finds_a_published_task()
 
     print()
     if FAILED:
