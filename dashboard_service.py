@@ -1046,6 +1046,10 @@ def _discovery_request(
             except Exception:
                 card["user_confirmed"] = False
         result["top5"] = top5_cards
+        try:
+            result["applied_filters"] = search_filters.to_dict()
+        except Exception:
+            result["applied_filters"] = {}
         note = language_market_note(search_filters)
         if note:
             result["language_market_note"] = note

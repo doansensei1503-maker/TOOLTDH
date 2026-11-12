@@ -27,6 +27,7 @@ const state = {
   topicQueries: [],
   queryStats: {},
   queryTotal: 0,
+  appliedFilters: null,
   langMarketNote: "",
   queue: null,
 };
@@ -341,6 +342,7 @@ async function loadDiscovery() {
       state.topicQueries = data.topic_queries || [];
       state.queryStats = data.query_stats || {};
       state.queryTotal = data.query_total_returned || 0;
+      state.appliedFilters = data.applied_filters || data.filters || null;
       state.langMarketNote = data.language_market_note || "";
       setRunStatus(data.status);
     }
@@ -430,6 +432,14 @@ function renderTop5() {
   if ((state.topicQueries || []).length) {
     meta.push("Nhóm truy vấn: " + state.topicQueries.join(" · "));
   }
+  if (state.appliedFilters) {
+    const f = state.appliedFilters;
+    const dur = (f.min_duration || f.max_duration)
+      ? ("thời lượng " + (f.min_duration || 0) + "–" + (f.max_duration || "∞") + "s")
+      : "thời lượng không giới hạn";
+    meta.push("Lọc: views≥" + (f.min_views || 0) + " · " + dur + " · ≤" + (f.max_days || "∞") + " ngày"
+      + " · topic: " + (state.result && state.result.topic ? state.result.topic : ""));
+  }
   if (state.queryTotal) {
     const parts = Object.entries(state.queryStats || {}).map(([q, s]) =>
       q + ": " + (s.returned || 0) + " trả về/" + (s.added || 0) + " giữ");
@@ -454,6 +464,7 @@ function renderTop5() {
       : ' <span class="tag tag-warn">NEEDS_REVIEW</span>';
     const confirmedTag = c.user_confirmed ? ' <span class="tag tag-accent">ĐÃ XÁC MINH THỦ CÔNG</span>' : "";
     const posted = c.posted_at ? " · đăng " + esc(c.posted_at) : "";
+    const dur = (c.duration_seconds ? Number(c.duration_seconds).toFixed(1) + "s" : (c.duration_unknown ? "thời lượng UNKNOWN" : "—"));
     let action = "";
     if (pick) {
       action = "<button class='btn btn-xs btn-primary' data-enqueue='" + esc(c.source_url) + "'>Xếp hàng</button>";
@@ -470,7 +481,7 @@ function renderTop5() {
       " điểm · " + esc(c.certainty || "UNKNOWN") + statusTag + confirmedTag + "</div><div class='notif-msg'>" +
       "<a href='" + esc(c.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>" +
       esc((c.title || c.source_url || "").slice(0, 80)) + "</a>" +
-      "<div class='muted'>@" + esc(c.creator || "") + " · " + num(c.views) + " views · " +
+      "<div class='muted'>@" + esc(c.creator || "") + " · " + num(c.views) + " views · " + dur + " · " +
       fmtAge(c.age_days) + posted + " · quyền: " + esc(c.rights || "—") + "</div>" +
       "<div>" + esc(c.reason || "") + "</div>" +
       "<div class='muted'>Không tự động đăng khi chưa xác minh nội dung và quyền.</div>" +
@@ -1103,6 +1114,7 @@ async function pollJob(jobId) {
       state.topicQueries = detail.topic_queries || [];
       state.queryStats = detail.query_stats || {};
       state.queryTotal = detail.query_total_returned || 0;
+      state.appliedFilters = detail.applied_filters || detail.filters || null;
       state.langMarketNote = detail.language_market_note || "";
       setRunStatus(detail.status);
       renderDiscovery();

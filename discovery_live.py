@@ -159,6 +159,15 @@ AI_MUSIC_SUBQUERIES = (
     "AI Cover", "AI Remix", "Suno AI Song", "Udio Music", "AI Generated Song",
 )
 
+# Naruto discovery coverage: one run uses at most these 3 queries, in
+# order. Retry applies per query (transient load only); a query with data
+# stops its own retry but the run still continues to the next query.
+NARUTO_QUERIES = (
+    "Naruto Shippuden anime music edit",
+    "Naruto music edit",
+    "Naruto Shippuden AMV",
+)
+
 MAX_TOPIC_QUERIES = 6
 
 
@@ -184,6 +193,14 @@ def expand_topic_queries(topic: str, max_queries: int = MAX_TOPIC_QUERIES) -> li
     if not base:
         return []
     lowered = base.lower()
+    if "naruto" in lowered:
+        queries: list[str] = []
+        for term in NARUTO_QUERIES:
+            if term.lower() not in {item.lower() for item in queries}:
+                queries.append(term)
+            if len(queries) >= max_queries:
+                break
+        return queries
     wants_ai = any(word in lowered for word in ("ai", "suno", "udio"))
     wants_market = any(
         word in lowered
@@ -263,9 +280,9 @@ class SearchFilters:
             min_likes=_int("min_likes"),
             min_comments=_int("min_comments"),
             min_shares=_int("min_shares"),
-            max_duration=_float("max_duration"),
-            min_duration=_float("min_duration"),
-            max_days=_int("max_days"),
+            max_duration=_float("max_duration") or _float("max_duration_seconds"),
+            min_duration=_float("min_duration") or _float("min_duration_seconds"),
+            max_days=_int("max_days") or _int("max_age_days"),
             must_include=_words("must_include"),
             exclude=_words("exclude"),
             must_include_any=_words("must_include_any"),
@@ -368,6 +385,7 @@ def _parse_item_list(payload: str, creator: str) -> list[VideoMetrics]:
                 ("likes", likes),
                 ("comments", comments),
                 ("shares", shares),
+                ("duration", duration_seconds),
             )
             if value is None
         ]
@@ -502,6 +520,7 @@ def parse_search_results(payload: str) -> list[VideoMetrics]:
                 ("likes", likes),
                 ("comments", comments),
                 ("shares", shares),
+                ("duration", duration_seconds),
             )
             if value is None
         ]
@@ -787,10 +806,13 @@ def _filter_reason(candidate: DiscoveredVideo, filters: "SearchFilters") -> str:
         if "shares" in unknown:
             return "chia sẻ không có dữ liệu nên không chứng minh được ngưỡng tối thiểu"
         return f"chia sẻ {candidate.shares} thấp hơn ngưỡng {filters.min_shares}"
-    if filters.max_duration and candidate.duration_seconds > filters.max_duration:
+    if filters.max_duration and candidate.duration_seconds and candidate.duration_seconds > filters.max_duration:
         return f"thời lượng {candidate.duration_seconds:.1f}s dài hơn giới hạn {filters.max_duration:.0f}s"
-    if filters.min_duration and candidate.duration_seconds and candidate.duration_seconds < filters.min_duration:
-        return f"thời lượng {candidate.duration_seconds:.1f}s ngắn hơn giới hạn {filters.min_duration:.0f}s"
+    if filters.min_duration:
+        if "duration" in unknown or not candidate.duration_seconds:
+            return "thời lượng không có dữ liệu (UNKNOWN) nên không chứng minh được ngưỡng tối thiểu 30s"
+        if candidate.duration_seconds < filters.min_duration:
+            return f"thời lượng {candidate.duration_seconds:.1f}s ngắn hơn giới hạn {filters.min_duration:.0f}s"
     if filters.max_days:
         posted = _posted_date(candidate.posted_at)
         if posted is not None:
@@ -934,6 +956,8 @@ def build_top5_cards(
             "title": str(getattr(video, "title", "") or ""),
             "posted_at": str(getattr(video, "posted_at", "") or ""),
             "views": int(getattr(video, "views", 0) or 0),
+            "duration_seconds": float(getattr(video, "duration_seconds", 0) or 0.0),
+            "duration_unknown": not bool(getattr(video, "duration_seconds", 0)),
             "age_days": age,
             "score": int(getattr(item, "score", 0) or 0),
             "certainty": certainty,
@@ -1453,6 +1477,7 @@ def require_candidates(candidates: list[DiscoveredVideo]) -> list[DiscoveredVide
 
 __all__ = [
     "AI_MUSIC_SUBQUERIES",
+    "NARUTO_QUERIES",
     "DEFAULT_SEARCH_TOPICS",
     "DiscoveryBlockedError",
     "ITEM_LIST_URL_MARKER",
