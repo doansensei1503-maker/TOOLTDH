@@ -255,8 +255,10 @@ def save_caption(publication_id: str, caption: str, hashtags: list[str] | None =
     conn = connect(db_path)
     try:
         pub = _get_pub(conn, publication_id)
-        if pub["status"] in {"PUBLISHED", "UPLOADING"}:
-            raise ValueError("bài đã đăng/đang đăng nên không sửa caption")
+        # FINAL STATE GUARD: terminal/active states are immutable.
+        # PUBLISH_UNKNOWN must never re-enter the queue via caption edit.
+        if pub["status"] in {"PUBLISHED", "UPLOADING", "PUBLISH_UNKNOWN"}:
+            raise ValueError("bài đã đăng/đang đăng/không xác định nên không sửa caption")
         conn.execute("UPDATE publications SET caption=?,hashtags_json=?,status=?,updated_at=? WHERE id=?",
                      (caption, json.dumps(tags, ensure_ascii=False), "CAPTION_READY", _now(), publication_id))
         pub = _get_pub(conn, publication_id)
@@ -268,10 +270,26 @@ def save_caption(publication_id: str, caption: str, hashtags: list[str] | None =
 
 
 def approve(publication_id: str, db_path: Path = DB_PATH) -> dict:
-    """Approval binds to publication_id; approved != published."""
+    """Approval binds to publication_id; approved != published.
+
+    FINAL STATE GUARD: only CAPTION_READY -> APPROVED.
+    APPROVED re-approve is idempotent (no data change).
+    SCHEDULED re-approve keeps schedule (no data change).
+    PUBLISHED/UPLOADING/PUBLISH_UNKNOWN/invalid are never re-approvable,
+    so no old post can re-enter the queue and double-post.
+    """
     conn = connect(db_path)
     try:
         pub = _get_pub(conn, publication_id)
+        status = str(pub.get("status", ""))
+        if status == "APPROVED":
+            return pub  # idempotent, no data change
+        if status == "SCHEDULED":
+            return pub  # keep schedule/account, no data change
+        if status != "CAPTION_READY":
+            raise ValueError(
+                f"không thể duyệt ở trạng thái {status or 'UNKNOWN'}; "
+                "chỉ duyệt từ CAPTION_READY")
         if not str(pub.get("caption", "")).strip():
             raise ValueError("chưa có caption nên không duyệt")
         conn.execute("UPDATE publications SET status=?,error=?,updated_at=? WHERE id=?",

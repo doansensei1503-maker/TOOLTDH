@@ -173,4 +173,74 @@ assert any(e.get("posted_url", "").endswith("/video/99901") for e in hist if e.g
 outv2 = pub.run_due(publisher=_ok, expected_account=ACCT, db_path=pub.DB_PATH)
 assert len([c for c in callsv if c["id"] == pv]) == 1, outv2
 
+# 6) FINAL PUBLICATION STATE GUARD
+import sqlite3 as _sq2
+
+
+def _force_status(pubid: str, status: str):
+    _c = _sq2.connect(str(pub.DB_PATH))
+    _c.execute("UPDATE publications SET status=? WHERE id=?", (status, pubid))
+    _c.commit()
+    _c.close()
+
+
+def _expect_blocked(fn, label: str):
+    try:
+        fn()
+    except (ValueError, svc.ServiceError) as e:
+        assert str(e), label
+        return
+    raise AssertionError(f"{label}: must be blocked")
+
+
+# CAPTION_READY -> APPROVED works
+pg = _mk("201", approve=False, sched=False)
+assert pub.get_publication(pg, pub.DB_PATH)["status"] == "CAPTION_READY"
+svc.p3_approve(publication_id=pg)
+assert pub.get_publication(pg, pub.DB_PATH)["status"] == "APPROVED"
+
+# APPROVED re-approve idempotent, no data change
+before = pub.get_publication(pg, pub.DB_PATH)
+svc.p3_approve(publication_id=pg)
+after = pub.get_publication(pg, pub.DB_PATH)
+assert after["status"] == "APPROVED" and after["caption"] == before["caption"], (before, after)
+assert after["scheduled_at"] == before["scheduled_at"] and after["account"] == before["account"]
+
+# SCHEDULED re-approve keeps schedule
+svc.p3_schedule(publication_id=pg, scheduled_at="2020-01-01T00:00:00", account=ACCT)
+sched_before = pub.get_publication(pg, pub.DB_PATH)
+assert sched_before["status"] == "SCHEDULED"
+svc.p3_approve(publication_id=pg)
+sched_after = pub.get_publication(pg, pub.DB_PATH)
+assert sched_after["status"] == "SCHEDULED", sched_after
+assert sched_after["scheduled_at"] == sched_before["scheduled_at"] == "2020-01-01T00:00:00", sched_after
+assert sched_after["account"] == ACCT, sched_after
+
+# PUBLISHED -> approve blocked
+_expect_blocked(lambda: svc.p3_approve(publication_id=pv), "PUBLISHED approve")
+assert pub.get_publication(pv, pub.DB_PATH)["status"] == "PUBLISHED"
+_expect_blocked(lambda: svc.p3_caption_save(publication_id=pv, caption="hack", hashtags=["#x"]),
+                 "PUBLISHED save_caption")
+
+# PUBLISH_UNKNOWN -> approve/save_caption blocked, no implicit retry path
+pu = _mk("202", approve=False, sched=False)
+_force_status(pu, "PUBLISH_UNKNOWN")
+_expect_blocked(lambda: svc.p3_approve(publication_id=pu), "UNKNOWN approve")
+_expect_blocked(lambda: svc.p3_caption_save(publication_id=pu, caption="hack", hashtags=["#x"]),
+                 "UNKNOWN save_caption")
+assert pub.get_publication(pu, pub.DB_PATH)["status"] == "PUBLISH_UNKNOWN"
+
+# UPLOADING -> approve/save_caption blocked
+pw = _mk("203", approve=False, sched=False)
+_force_status(pw, "UPLOADING")
+_expect_blocked(lambda: svc.p3_approve(publication_id=pw), "UPLOADING approve")
+_expect_blocked(lambda: svc.p3_caption_save(publication_id=pw, caption="hack", hashtags=["#x"]),
+                 "UPLOADING save_caption")
+assert pub.get_publication(pw, pub.DB_PATH)["status"] == "UPLOADING"
+_force_status(pw, "CAPTION_READY")  # restore so it cannot jam later gates
+
+# invalid status -> approve blocked
+assert pub.get_publication(pu, pub.DB_PATH)["status"] == "PUBLISH_UNKNOWN"  # still terminal
+
 print("P3-GATE PASS: sched-blocked-unapproved; approved->sched ok; account-required; no-parallel-upload; valid-flow ok")
+print("P3-STATE-GUARD PASS: published/unknown/uploading locked; caption_ready->approved; idempotent; sched-kept")
