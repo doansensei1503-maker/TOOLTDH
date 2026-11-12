@@ -2181,26 +2181,10 @@ def p3_schedule(publication_id: str = "", scheduled_at: str = "", account: str =
 
 
 def _p3_publisher() -> Any:
-    """Return the real publisher adapter without hardcoding browser logic here.
+    """Return the real publisher adapter for the P3 worker (single source)."""
+    import p3_publish as _pub
 
-    Uses poster.post_to_tiktok_studio when available; raises otherwise so
-    run_due records FAILED instead of pretending success.
-    """
-    def _publish(pub: dict[str, Any]) -> dict[str, Any]:
-        from poster import post_to_tiktok_studio
-
-        config = _load_config()
-        res = post_to_tiktok_studio(
-            str(pub.get("id", "")), str(pub.get("caption", "")), str(pub.get("media_path", "")),
-            config, approved=True, hashtags=list(pub.get("hashtags", []) or []),
-            keep_browser_open=True, wait_for_user=None,
-        )
-        d = res.to_dict() if hasattr(res, "to_dict") else dict(res or {})
-        url = str(d.get("posted_url", "") or d.get("state", {}).get("posted_url", "") or "").strip()
-        pid = str(d.get("state", {}).get("draft_reference", "") or "").strip()
-        return {"posted_url": url, "posted_id": pid}
-
-    return _publish
+    return _pub.real_publisher(_load_config())
 
 
 def p3_run_due() -> dict[str, Any]:

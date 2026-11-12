@@ -47,6 +47,35 @@ CREATE TABLE IF NOT EXISTS publications (
 );
 """
 
+PUBLISHED_URL_RE = re.compile(r"https://[^\s/]+/(@[^\s/]+/)?video/(\d+)", re.I)
+
+
+def _extract_video_id(url: str) -> str:
+    m = PUBLISHED_URL_RE.search(str(url or "").strip())
+    return m.group(2) if m else ""
+
+
+def _is_verified_post(posted_url: str, posted_id: str = "") -> bool:
+    """A post counts only with a verified platform video URL.
+
+    Draft references (tiktokstudio/...) or upload-complete markers never
+    satisfy this. When both URL and ID are present they must agree.
+    """
+    url = str(posted_url or "").strip()
+    m = PUBLISHED_URL_RE.search(url)
+    if not m:
+        return False
+    vid = m.group(2)
+    pid = str(posted_id or "").strip()
+    if pid and pid != vid:
+        # A numeric posted_id must match the URL's /video/<id>; a numeric
+        # mismatch is spoofed evidence -> not verified. Non-numeric junk
+        # (draft markers etc.) is ignored and the URL alone decides.
+        if pid.isdigit():
+            return False
+    return True
+
+
 VI_ERRORS = {
     "not_approved": "Bài đăng chưa được duyệt nên không đăng.",
     "rights": "Video không có quyền đăng hợp lệ nên bị từ chối (RIGHTS_REQUIRED).",
@@ -273,6 +302,87 @@ def schedule(publication_id: str, scheduled_at: str = "", account: str = "",
         conn.close()
 
 
+def real_publisher(config: dict[str, Any]) -> Callable[[dict], dict]:
+    """Build the real publish adapter from a loaded config (single source).
+
+    Pre-flight: publication must be approval-bound, rights permitted, real
+    media file exists, caption non-empty, target == connected account.
+    Forces poster's real publish path (mode="auto") — never approve-mode
+    draft flow. Maps DRAFT_SAVED/BLOCKED/FAILED/PUBLISHED distinctly and
+    never converts draft_reference into a posted id.
+    """
+    def _publish(pub: dict[str, Any]) -> dict[str, Any]:
+        from poster import post_to_tiktok_studio
+
+        if str(pub.get("status", "")) not in {"UPLOADING", "APPROVED", "SCHEDULED"}:
+            raise RuntimeError("Bài đăng chưa được duyệt nên không đăng.")
+        if str(pub.get("rights", "")) != "ALLOWLISTED_PERMITTED":
+            raise RuntimeError("Video không có quyền đăng hợp lệ (RIGHTS_REQUIRED).")
+        media = str(pub.get("media_path", ""))
+        if not media or not Path(media).is_file():
+            raise RuntimeError("Không thấy file MediaAsset thật nên không đăng.")
+        if not str(pub.get("caption", "") or "").strip():
+            raise RuntimeError("caption rỗng nên không đăng.")
+        expected = str(config.get("expected_account", "") or "").strip().lstrip("@").lower()
+        target = str(pub.get("account", "") or "").strip().lstrip("@").lower()
+        if expected and target and target != expected:
+            raise RuntimeError("Tài khoản TikTok đã kết nối không khớp tài khoản đích nên dừng lại.")
+        pub_config = dict(config or {})
+        pub_config["mode"] = "auto"  # real publish path; approve mode only saves drafts
+        res = post_to_tiktok_studio(
+            str(pub.get("id", "")), str(pub.get("caption", "")), media,
+            pub_config, approved=True, hashtags=list(pub.get("hashtags", []) or []),
+            keep_browser_open=True, wait_for_user=None,
+        )
+        d = res.to_dict() if hasattr(res, "to_dict") else dict(res or {})
+        status = str(d.get("status", "") or "").strip().upper()
+        st = d.get("state", {}) if isinstance(d.get("state"), dict) else {}
+        url = str(st.get("posted_url", "") or d.get("posted_url", "") or "").strip()
+        draft = str(st.get("draft_reference", "") or "").strip()
+        out: dict[str, Any] = {"status": status or "PUBLISH_UNKNOWN",
+                               "posted_url": url, "posted_id": "",
+                               "draft_reference": draft,
+                               "message": str(d.get("message", "") or "")[:300]}
+        # posted_id ONLY from a verified posted URL's /video/<id>; drafts never map.
+        m = PUBLISHED_URL_RE.search(url)
+        if m:
+            out["posted_id"] = m.group(2)
+        return out
+
+    return _publish
+
+
+def _claim(conn: sqlite3.Connection, pub_id: str) -> bool:
+    """Atomically claim one APPROVED/SCHEDULED job for this worker.
+
+    Single conditional UPDATE: exactly one concurrent worker wins.
+    """
+    cur = conn.execute(
+        "UPDATE publications SET status=?,attempts=attempts+1,updated_at=? "
+        "WHERE id=? AND status IN ('APPROVED','SCHEDULED')",
+        ("UPLOADING", _now(), pub_id),
+    )
+    conn.commit()
+    if cur.rowcount == 1:
+        try:
+            _sync_job(conn, _get_pub(conn, pub_id))
+            conn.commit()
+        except Exception:
+            pass
+        return True
+    return False
+
+
+def _settle(conn: sqlite3.Connection, pub_id: str, status: str, *,
+            posted_url: str = "", posted_id: str = "", error: str = "") -> dict:
+    conn.execute("UPDATE publications SET status=?,posted_url=?,posted_id=?,error=?,updated_at=? WHERE id=?",
+                 (status, posted_url, posted_id, error, _now(), pub_id))
+    pub = _get_pub(conn, pub_id)
+    _sync_job(conn, pub)
+    conn.commit()
+    return pub
+
+
 def _counts_today_hour(pubs: list[dict], now: datetime) -> tuple[int, int]:
     day = hour = 0
     for p in pubs:
@@ -295,14 +405,26 @@ def run_due(now: datetime | None = None,
             db_path: Path = DB_PATH) -> list[dict]:
     """Worker: publish due APPROVED/SCHEDULED publications, one at a time.
 
-    publisher(pub) -> {"posted_url":..., "posted_id":...} on success.
-    No URL -> PUBLISH_UNKNOWN (no repost). Exceptions -> FAILED.
+    publisher(pub) must return {"status","posted_url","posted_id",...}.
+    PUBLISHED requires status == "PUBLISHED" AND a verified /video/<id> URL
+    (draft_reference or upload-complete markers never count).
+    Missing/insufficient evidence -> PUBLISH_UNKNOWN (never reposted).
+    Exceptions -> FAILED. Concurrent workers: atomic claim wins once.
     """
     moment = now or datetime.now()
     conn = connect(db_path)
+    conn.isolation_level = None  # autocommit; claim relies on single UPDATE
     outcomes: list[dict] = []
     try:
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+        except Exception:
+            pass
         rows = conn.execute("SELECT * FROM publications ORDER BY created_at ASC").fetchall()
+        try:
+            conn.execute("COMMIT")
+        except Exception:
+            pass
         pubs = [_row_to_dict(r) for r in rows]
         if any(p["status"] == "UPLOADING" for p in pubs):
             return [{"status": "SKIP_ACTIVE", "reason": VI_ERRORS["active"]}]
@@ -319,10 +441,7 @@ def run_due(now: datetime | None = None,
                 except Exception:
                     pass
             if str(pub.get("rights", "")) != "ALLOWLISTED_PERMITTED":
-                conn.execute("UPDATE publications SET status=?,error=?,updated_at=? WHERE id=?",
-                             ("RIGHTS_REQUIRED", VI_ERRORS["rights"], _now(), pub["id"]))
-                _sync_job(conn, _get_pub(conn, pub["id"]))
-                conn.commit()
+                _settle(conn, pub["id"], "RIGHTS_REQUIRED", error=VI_ERRORS["rights"])
                 outcomes.append({"id": pub["id"], "status": "RIGHTS_REQUIRED",
                                  "reason": VI_ERRORS["rights"]})
                 continue
@@ -333,65 +452,66 @@ def run_due(now: datetime | None = None,
                 outcomes.append({"id": pub["id"], "status": "LIMIT_HOUR", "reason": VI_ERRORS["limit_hour"]})
                 continue
             acct = str(pub.get("account", "") or "").strip()
-            if expected_account and acct and acct != expected_account:
-                conn.execute("UPDATE publications SET status=?,error=?,updated_at=? WHERE id=?",
-                             ("FAILED", VI_ERRORS["account"], _now(), pub["id"]))
-                _sync_job(conn, _get_pub(conn, pub["id"]))
-                conn.commit()
+            if expected_account and acct and acct.strip().lstrip("@").lower() != expected_account.strip().lstrip("@").lower():
+                _settle(conn, pub["id"], "FAILED", error=VI_ERRORS["account"])
                 outcomes.append({"id": pub["id"], "status": "FAILED", "reason": VI_ERRORS["account"]})
                 continue
             media = str(pub.get("media_path", ""))
             if not media or not Path(media).is_file():
-                conn.execute("UPDATE publications SET status=?,error=?,updated_at=? WHERE id=?",
-                             ("FAILED", "Không thấy file MediaAsset thật nên không đăng.", _now(), pub["id"]))
-                _sync_job(conn, _get_pub(conn, pub["id"]))
-                conn.commit()
+                _settle(conn, pub["id"], "FAILED",
+                        error="Không thấy file MediaAsset thật nên không đăng.")
                 outcomes.append({"id": pub["id"], "status": "FAILED", "reason": "missing media asset"})
                 continue
-            conn.execute("UPDATE publications SET status=?,attempts=attempts+1,updated_at=? WHERE id=?",
-                         ("UPLOADING", _now(), pub["id"]))
-            _sync_job(conn, _get_pub(conn, pub["id"]))
-            conn.commit()
+            if not str(pub.get("caption", "") or "").strip():
+                _settle(conn, pub["id"], "FAILED", error="caption rỗng nên không đăng.")
+                outcomes.append({"id": pub["id"], "status": "FAILED", "reason": "empty caption"})
+                continue
+            if not _claim(conn, pub["id"]):
+                outcomes.append({"id": pub["id"], "status": "SKIP_ACTIVE",
+                                 "reason": VI_ERRORS["active"]})
+                continue
+            fresh = _get_pub(conn, pub["id"])
             try:
                 if publisher is None:
                     raise RuntimeError("chưa cấu hình publisher")
-                res = publisher(pub) or {}
+                res = publisher(fresh) or {}
             except Exception as exc:
-                conn.execute("UPDATE publications SET status=?,error=?,updated_at=? WHERE id=?",
-                             ("FAILED", f"Lỗi đăng bài: {str(exc)[:300]}", _now(), pub["id"]))
-                _sync_job(conn, _get_pub(conn, pub["id"]))
-                conn.commit()
+                _settle(conn, pub["id"], "FAILED",
+                        error=f"Lỗi đăng bài: {str(exc)[:300]}")
                 outcomes.append({"id": pub["id"], "status": "FAILED", "reason": str(exc)[:200]})
                 continue
+            status = str(res.get("status", "") or "").strip().upper()
             url = str(res.get("posted_url", "") or "").strip()
             pid_post = str(res.get("posted_id", "") or "").strip()
-            if not url and not pid_post:
-                conn.execute("UPDATE publications SET status=?,error=?,updated_at=? WHERE id=?",
-                             ("PUBLISH_UNKNOWN", VI_ERRORS["no_url"], _now(), pub["id"]))
-                _sync_job(conn, _get_pub(conn, pub["id"]))
-                conn.commit()
-                outcomes.append({"id": pub["id"], "status": "PUBLISH_UNKNOWN",
-                                 "reason": VI_ERRORS["no_url"]})
-                continue
-            conn.execute("UPDATE publications SET status=?,posted_url=?,posted_id=?,error=?,updated_at=? WHERE id=?",
-                         ("PUBLISHED", url, pid_post, "", _now(), pub["id"]))
-            pub2 = _get_pub(conn, pub["id"])
-            _sync_job(conn, pub2)
-            conn.commit()
-            day += 1
-            hour += 1
-            try:
-                from history import PublishHistory
+            if status == "PUBLISHED" and _is_verified_post(url, pid_post):
+                vid = _extract_video_id(url)
+                final_id = pid_post if (pid_post and pid_post == vid) else vid
+                pub2 = _settle(conn, pub["id"], "PUBLISHED",
+                               posted_url=url, posted_id=final_id, error="")
+                day += 1
+                hour += 1
+                try:
+                    from history import PublishHistory
 
-                PublishHistory().record_publish(
-                    task_id=pub["id"], platform="tiktok",
-                    source_url=pub.get("source_url", ""), posted_url=url,
-                    caption=pub.get("caption", ""), status="PUBLISHED",
-                    metadata={"publication_id": pub["id"], "hashtags": pub2.get("hashtags", [])},
-                )
-            except Exception:
-                pass
-            outcomes.append({"id": pub["id"], "status": "PUBLISHED", "posted_url": url})
+                    PublishHistory().record_publish(
+                        task_id=pub["id"], platform="tiktok",
+                        source_url=pub.get("source_url", ""), posted_url=url,
+                        caption=pub.get("caption", ""), status="PUBLISHED",
+                        metadata={"publication_id": pub["id"],
+                                  "hashtags": pub2.get("hashtags", []),
+                                  "posted_id": final_id},
+                    )
+                except Exception:
+                    pass
+                outcomes.append({"id": pub["id"], "status": "PUBLISHED", "posted_url": url})
+                continue
+            # Any non-PUBLISHED status or unverifiable evidence:
+            # DRAFT_SAVED / BLOCKED / FAILED / missing URL all land here.
+            detail = str(res.get("draft_reference", "") or res.get("message", "") or "").strip()[:200]
+            err = VI_ERRORS["no_url"] + (f" ({status}: {detail})" if detail or status else "")
+            _settle(conn, pub["id"], "PUBLISH_UNKNOWN", error=err)
+            outcomes.append({"id": pub["id"], "status": "PUBLISH_UNKNOWN",
+                             "reason": err})
         return outcomes
     finally:
         conn.close()

@@ -366,6 +366,71 @@ def run_queue_pass(
     return "AWAITING_APPROVAL"
 
 
+def run_p3_auto_pass(
+    config: dict[str, Any] | None = None,
+    *,
+    log: Callable[[str], None] = print,
+    state_path: Path = SCHEDULE_STATE_FILE,
+    now: datetime | None = None,
+) -> str:
+    """Process due P3 publications when Auto Publish is ON.
+
+    Gated by the independent P3 auto_publish toggle (data/state/p3_settings.json)
+    and the dashboard emergency stop (data/settings.json). Respects per-hour /
+    per-day caps inside the worker; each publication is atomically claimed so
+    one scheduler worker handles it. After a restart the DB state is re-read,
+    so no upload is repeated and nothing is lost.
+    """
+    import os as _os
+
+    from pathlib import Path as _P
+
+    def _read_json_file(path: _P, default: Any) -> Any:
+        try:
+            return json.loads(_P(path).read_text(encoding="utf-8"))
+        except Exception:
+            return default
+
+    p3_path = _P(_os.environ.get("P3_SETTINGS_PATH", "data/state/p3_settings.json"))
+    p3data = _read_json_file(p3_path, {})
+    if not bool((p3data or {}).get("auto_publish", False) if isinstance(p3data, dict) else False):
+        return "AUTO_OFF"
+    dash = _read_json_file(Path("data") / "settings.json", {})
+    if bool((dash or {}).get("emergency_stop", False)) if isinstance(dash, dict) else False:
+        log("P3 AUTO: emergency stop is on, skipping publish pass.")
+        return "STOPPED"
+    try:
+        import p3_publish as _pub
+    except Exception as exc:
+        log(f"P3 AUTO: cannot load publisher module: {exc}")
+        return "FAILED"
+    moment = now or datetime.now()
+    try:
+        db_env = _os.environ.get("P1_DB_PATH", "")
+        db_path = _P(db_env) if db_env else None
+        kwargs: dict[str, Any] = {
+            "publisher": _pub.real_publisher(config or {}),
+            "expected_account": str((config or {}).get("expected_account", "") or "").strip().lstrip("@"),
+            "now": moment,
+        }
+        if db_path is not None:
+            kwargs["db_path"] = db_path
+        outcomes = _pub.run_due(**kwargs)
+    except Exception as exc:
+        log(f"P3 AUTO: worker failed: {exc}")
+        return "FAILED"
+    state = load_schedule_state(state_path)
+    state.setdefault("p3_auto_runs", []).append({
+        "at": moment.isoformat(),
+        "outcomes": outcomes,
+    })
+    state["p3_auto_runs"] = state["p3_auto_runs"][-30:]
+    save_schedule_state(state, state_path)
+    published = sum(1 for o in outcomes if o.get("status") == "PUBLISHED")
+    log(f"P3 AUTO: {len(outcomes)} due, {published} published.")
+    return "OK"
+
+
 def build_scheduler(
     config: dict[str, Any],
     *,
@@ -451,6 +516,20 @@ def build_scheduler(
         coalesce=True,
         replace_existing=True,
     )
+
+    # P3 auto publish: checks due APPROVED/SCHEDULED publications every
+    # 10 minutes, but only acts when the independent Auto Publish toggle
+    # is ON. Each publication is atomically claimed; restart is DB-driven.
+    scheduler.add_job(
+        run_p3_auto_pass,
+        trigger=CronTrigger(minute="*/10"),
+        id="toolt-dh-p3-auto",
+        args=[config],
+        kwargs={"log": log, "state_path": state_path},
+        max_instances=1,
+        coalesce=True,
+        replace_existing=True,
+    )
     return scheduler
 
 
@@ -481,10 +560,11 @@ __all__ = [
     "SchedulerError",
     "build_scheduler",
     "load_schedule_state",
-  "parse_daily_time",
-  "run_queue_pass",
-  "run_retention_pass",
-  "run_scheduled_task",
+    "run_p3_auto_pass",
+    "parse_daily_time",
+    "run_queue_pass",
+    "run_retention_pass",
+    "run_scheduled_task",
     "save_schedule_state",
     "start_scheduler",
 ]
