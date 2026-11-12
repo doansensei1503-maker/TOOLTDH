@@ -154,20 +154,21 @@ function emptyRow(colspan, text) {
 /* ---------------------------------------------------------- routing */
 
 const TITLES = {
-  overview: ["Dashboard", "Trạng thái thật của hệ thống."],
-  assistant: ["AI Assistant", "Trợ lý đọc trạng thái thật, không tự hành động."],
-  discovery: ["TikTok Discovery", "Tìm video theo chủ đề, chỉ số thật từ nguồn."],
-  trends: ["Trend Analyzer", "Điểm xu hướng và lý do mỗi video được chọn hoặc loại."],
-  filter: ["Video Filter", "Mỗi lượt chỉ chọn một video tốt nhất."],
-  caption: ["Caption & Hashtag Studio", "Soạn và sửa caption trước khi duyệt."],
-  videos: ["Video Manager", "Thư viện video đã tải và đã xử lý."],
-  editor: ["Video Editor", "Kiểm tra và cắt video bằng backend."],
-  approval: ["Approval Center", "Duyệt tải video và duyệt đăng video là hai quyền riêng."],
-  scheduler: ["Auto Scheduler", "Lịch chạy tự động, mỗi lượt một video."],
-  studio: ["TikTok Studio", "Bản nháp. Không tự đăng công khai."],
-  analytics: ["Analytics", "Thống kê hiệu quả từ dữ liệu thật."],
-  history: ["History & Logs", "Lịch sử đăng bài và nhật ký hoạt động."],
-  settings: ["Settings & Security", "Cấu hình và quyền truy cập."],
+  overview: ["Tổng quan", "Trạng thái thật của hệ thống.", "Tổng quan"],
+  assistant: ["AI Assistant", "Trợ lý đọc trạng thái thật, không tự hành động.", "Nâng cao / AI Assistant"],
+  discovery: ["Dự án", "Project, version và TOP video theo dữ liệu thật.", "Dự án"],
+  trends: ["Trend Analyzer", "Điểm xu hướng và lý do mỗi video được chọn hoặc loại.", "Nâng cao / Trend Analyzer"],
+  filter: ["Video Filter", "Mỗi lượt chỉ chọn một video tốt nhất.", "Nâng cao / Video Filter"],
+  caption: ["Caption & Hashtag Studio", "Soạn và sửa caption trước khi duyệt.", "Nâng cao / Caption & Hashtag"],
+  videos: ["Video Lab", "Đo thật bằng FFprobe/FFmpeg, tải duy nhất 1 video đủ quyền.", "Video Lab"],
+  videoslib: ["Thư viện", "Media đã tải, đã hash và đã xử lý.", "Thư viện"],
+  editor: ["Video Editor", "Kiểm tra và cắt video bằng backend.", "Nâng cao / Video Editor"],
+  approval: ["Approval Center", "Duyệt tải video và duyệt đăng video là hai quyền riêng.", "Nâng cao / Approval Center"],
+  scheduler: ["Xuất bản", "Caption → Duyệt → Lịch → Đăng. Chỉ PUBLISHED khi có URL xác minh.", "Xuất bản"],
+  studio: ["TikTok Studio", "Bản nháp. Không tự đăng công khai.", "Nâng cao / TikTok Studio"],
+  analytics: ["Analytics", "Thống kê hiệu quả từ dữ liệu thật.", "Nâng cao / Analytics"],
+  history: ["History & Logs", "Lịch sử đăng bài và nhật ký hoạt động.", "Nâng cao / History & Logs"],
+  settings: ["Cài đặt", "Cấu hình và quyền truy cập.", "Cài đặt"],
 };
 
 function showView(name) {
@@ -178,9 +179,10 @@ function showView(name) {
   document.querySelectorAll(".nav-item").forEach((b) => {
     b.classList.toggle("active", b.dataset.view === name);
   });
-  const title = TITLES[name] || ["TOOLTDH", ""];
+  const title = TITLES[name] || ["TOOLTDH", "", ""];
   el("view-title").textContent = title[0];
-  el("view-sub").textContent = title[1];
+  el("view-sub").textContent = title[1] || "";
+  if (el("crumbs")) el("crumbs").innerHTML = "<span>TOOLTDH Pro</span><span class='crumb-sep'>/</span><span>" + esc(title[2] || title[0]) + "</span>";
   location.hash = name;
   loadView(name);
 }
@@ -192,7 +194,8 @@ function loadView(name) {
   if (name === "filter") return loadFilterView();
   if (name === "approval") return loadApprovals();
   if (name === "scheduler") return loadScheduler();
-  if (name === "videos") return loadLibrary();
+  if (name === "videos") return loadDiscovery();
+  if (name === "videoslib") return loadLibrary();
   if (name === "history") return loadHistory();
   if (name === "analytics") return loadAnalytics();
   if (name === "settings") return loadSettings();
@@ -373,7 +376,7 @@ function renderDiscovery() {
       const isSelected = state.selected && state.selected.source_url === c.source_url;
       return "<tr" + (isSelected ? " style='background:rgba(79,140,255,.09)'" : "") + ">" +
         "<td>" + (i + 1) + (isSelected ? " ★" : "") + "</td>" +
-        "<td><a href='" + esc(c.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>" +
+        "<td><a href='" + esc(c.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--burgundy-ink)'>" +
           esc((c.title || c.source_url).slice(0, 60)) + "</a>" +
           "<div class='muted'>" + esc(c.creator || "") + "</div></td>" +
         "<td class='num'>" + metric(c.views, known) + "</td>" +
@@ -411,7 +414,7 @@ function renderNeedsReview() {
   return '<div class="card" style="margin-top:8px"><strong>Cần xem lại (' + items.length + ")</strong>" +
     '<div class="muted">Đạt điều kiện metadata nhưng nội dung chưa đủ bằng chứng. Không tự động đăng.</div>' +
     items.slice(0, 5).map((n) =>
-      "<div class='muted' style='margin-top:6px'><a href='" + esc(n.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>" +
+      "<div class='muted' style='margin-top:6px'><a href='" + esc(n.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--burgundy-ink)'>" +
       esc((n.title || n.source_url || "").slice(0, 80)) + "</a>" +
       "<div>@" + esc(n.creator || "") + " · " + num(n.views) + " views · đăng " + esc(n.posted_at || "—") +
       " · điểm xu hướng " + num(n.trend_score ?? n.score ?? 0) + " · quyền: " + esc(n.rights || "—") + "</div>" +
@@ -458,6 +461,12 @@ function renderTop5() {
     ? '<div class="notif"><div class="notif-kind">Ghi chú</div><div class="notif-msg">' +
       esc(meta.join(" | ")) + "</div></div>"
     : "";
+  const strip = el("disc-search-stats");
+  if (strip) {
+    strip.innerHTML = meta.length
+      ? meta.map((m) => '<span class="info-chip">' + esc(m) + "</span>").join("")
+      : '<span class="info-chip">Chưa có kết quả tìm kiếm.</span>';
+  }
   if (!cards.length) {
     box.innerHTML = head + '<div class="empty">Chưa có TOP 5. Bấm “Tìm kiếm” để hệ thống đề xuất tối đa 5 video tốt nhất (không cố lấp đủ 5).</div>';
     return;
@@ -483,15 +492,16 @@ function renderTop5() {
           + " <button class='btn btn-xs btn-danger' data-dismiss-content='" + esc(c.source_url) + "'>Loại bỏ</button>";
       }
     }
-    return "<div class='notif'><div class='notif-kind'>TOP " + (i + 1) + " · " + num(c.score) +
-      " điểm · " + esc(c.certainty || "UNKNOWN") + statusTag + confirmedTag + "</div><div class='notif-msg'>" +
-      "<a href='" + esc(c.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>" +
-      esc((c.title || c.source_url || "").slice(0, 80)) + "</a>" +
-      "<div class='muted'>@" + esc(c.creator || "") + " · " + num(c.views) + " views · " + dur + " · " +
+    return "<div class='top5-row" + (pick ? " is-pick" : "") + "'><div class='top5-rank'>" + (i + 1) + "</div>" +
+      "<div><div class='top5-title'>" +
+      "<a href='" + esc(c.source_url) + "' target='_blank' rel='noreferrer'>" +
+      esc((c.title || c.source_url || "").slice(0, 80)) + "</a></div>" +
+      "<div class='top5-meta'>@" + esc(c.creator || "") + " · " + num(c.views) + " views · " + dur + " · " +
       fmtAge(c.age_days) + posted + " · quyền: " + esc(c.rights || "—") + "</div>" +
-      "<div>" + esc(c.reason || "") + "</div>" +
-      "<div class='muted'>Không tự động đăng khi chưa xác minh nội dung và quyền.</div>" +
-      (action ? "<div class='row' style='margin-top:6px'>" + action + "</div>" : "") +
+      (c.reason ? "<div class='top5-meta'>" + esc(c.reason) + "</div>" : "") +
+      "</div><div class='top5-side'><span class='top5-score'>" + num(c.score) + "đ</span>" +
+      "<span>" + esc(c.certainty || "UNKNOWN") + statusTag + confirmedTag + "</span>" +
+      (action ? "<div class='top5-actions'>" + action + "</div>" : "") +
       "</div></div>";
   }).join("") + renderNeedsReview();
 }
@@ -671,7 +681,7 @@ function renderSelected() {
     "<dl class='kv'>" +
     "<dt>Tiêu đề</dt><dd>" + esc(selected.title || "—") + "</dd>" +
     "<dt>Creator</dt><dd>" + esc(selected.creator || "—") + "</dd>" +
-    "<dt>URL</dt><dd><a href='" + esc(selected.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>" +
+    "<dt>URL</dt><dd><a href='" + esc(selected.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--burgundy-ink)'>" +
       esc(selected.source_url) + "</a></dd>" +
     "<dt>Lượt xem</dt><dd>" + metric(selected.views, known) + "</dd>" +
     "<dt>Lượt thích</dt><dd>" + metric(selected.likes, known) + "</dd>" +
@@ -692,7 +702,7 @@ function renderTrends() {
   el("trend-table").innerHTML =
     "<thead><tr><th>Video</th><th>Điểm</th><th>Quyết định</th><th>Chi tiết điểm</th></tr></thead><tbody>" +
     (scores.length ? scores.map((s) =>
-      "<tr><td><span style='color:var(--accent)'>" + esc((s.video.title || s.video.source_url).slice(0, 50)) +
+      "<tr><td><span style='color:var(--burgundy-ink)'>" + esc((s.video.title || s.video.source_url).slice(0, 50)) +
         "</span><div class='muted'>" + esc(s.video.creator || "") + "</div></td>" +
       "<td class='num'>" + s.score + "</td>" +
       "<td>" + tag(s.decision, statusKind(s.decision)) + "</td>" +
@@ -1212,7 +1222,7 @@ function renderVideoDetail(data) {
   );
 
   add("Tiêu đề", esc(candidate.title || "—"));
-  add("URL nguồn", "<a href='" + esc(candidate.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>" +
+  add("URL nguồn", "<a href='" + esc(candidate.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--burgundy-ink)'>" +
     esc(candidate.source_url) + "</a>");
   add("Creator", esc(candidate.creator || "—"));
   add("Nguồn", esc(candidate.source_name || "—"));
@@ -1601,6 +1611,17 @@ function bindEvents() {
   });
 
   el("btn-refresh").addEventListener("click", () => { loadView(state.view); loadNotifications(); });
+  document.querySelectorAll(".tab[data-tab]").forEach((t) => {
+    t.addEventListener("click", () => {
+      const panel = t.closest(".view") || document;
+      panel.querySelectorAll(".tab[data-tab]").forEach((x) => x.classList.toggle("active", x === t));
+      const scope = t.closest(".view") || document;
+      scope.querySelectorAll(".tab-panel[data-panel]").forEach((p) => {
+        p.classList.toggle("active", p.dataset.panel === t.dataset.tab);
+      });
+    });
+  });
+  if (el("btn-p2-goto")) el("btn-p2-goto").addEventListener("click", () => showView("videos"));
   el("btn-discover").addEventListener("click", () => runDiscovery(false));
   el("btn-discover-again").addEventListener("click", () => runDiscovery(false));
   el("btn-discover-resume").addEventListener("click", () => runDiscovery(true));
@@ -1737,7 +1758,14 @@ async function bindP1() {
     el("btn-p1-search").addEventListener("click", p1Search);
     el("btn-p1-open").addEventListener("click", p1Open);
     el("p1-project").addEventListener("change", (e) => { p1state.projectId = e.target.value; p1state.runId = ""; loadP1Runs(); });
-    el("p1-run").addEventListener("change", (e) => { p1state.runId = e.target.value; });
+    el("p1-run").addEventListener("change", (e) => { p1state.runId = e.target.value; renderP1Header(); });
+    if (el("p1-runs-table")) el("p1-runs-table").addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-run-open]");
+      if (!btn) return;
+      p1state.runId = btn.dataset.runOpen;
+      if (el("p1-run")) el("p1-run").value = p1state.runId;
+      p1Open();
+    });
     if (el("btn-p2-detail")) el("btn-p2-detail").addEventListener("click", p2Detail);
     if (el("btn-p2-analyze")) el("btn-p2-analyze").addEventListener("click", p2Analyze);
     if (el("btn-p2-download")) el("btn-p2-download").addEventListener("click", p2Download);
@@ -1779,9 +1807,29 @@ async function loadP1Runs() {
       "<option value='" + esc(r.id) + "'>" + esc(r.version) + " · " + esc(r.created_at || "") + "</option>").join("")
       || "<option value=''>— chưa có run —</option>";
     p1state.runId = sel.value || "";
-    const st = el("p1-proj-state");
-    if (st) st.textContent = p1state.runs.length ? p1state.runs.length + " version" : "—";
+    renderP1Header();
   } catch (_) { /* offline ok */ }
+}
+
+function renderP1Header() {
+  const proj = (p1state.projects || []).find((p) => p.id === p1state.projectId) || null;
+  if (el("p1-project-name")) el("p1-project-name").textContent = proj ? (proj.name || proj.topic || "Project") : "Project";
+  const run = (p1state.runs || []).find((r) => r.id === p1state.runId) || (p1state.runs || [])[0] || null;
+  if (el("p1-project-meta")) {
+    el("p1-project-meta").textContent = proj
+      ? ("Chủ đề: " + (proj.topic || "—") + " · Version: " + (run ? (run.version || run.id) : "chưa có") + " · " + (p1state.runs || []).length + " version")
+      : "Chưa chọn project.";
+  }
+  const box = el("p1-runs-table");
+  if (box) {
+    const rows = p1state.runs || [];
+    box.innerHTML = "<thead><tr><th>Version</th><th>Thời gian</th><th></th></tr></thead><tbody>" +
+      (rows.length ? rows.map((r) =>
+        "<tr" + (r.id === p1state.runId ? " class='sel'" : "") + "><td>" + esc(r.version || r.id) + "</td>" +
+        "<td class='muted'>" + esc(r.created_at || "—") + "</td>" +
+        "<td><button class='btn btn-xs' data-run-open='" + esc(r.id) + "'>Mở</button></td></tr>").join("")
+        : emptyRow(3, "Chưa có version. Bấm “Tìm kiếm” để lưu version mới.")) + "</tbody>";
+  }
 }
 
 async function p1Create() {
@@ -1870,7 +1918,7 @@ async function p2Detail() {
     const v = res.video || {};
     el("p2-lab-state").textContent = "rank #" + (v.rank || "-");
     el("p2-lab-out").innerHTML = "<dl class='kv'>" +
-      "<dt>URL</dt><dd><a href='" + esc(v.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>" + esc(v.source_url) + "</a></dd>" +
+      "<dt>URL</dt><dd><a href='" + esc(v.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--burgundy-ink)'>" + esc(v.source_url) + "</a></dd>" +
       "<dt>Creator</dt><dd>" + esc(v.creator || "—") + "</dd>" +
       "<dt>Metrics</dt><dd>" + num(v.views) + " views · " + num(v.likes) + " likes · " + (v.duration || 0) + "s</dd>" +
       "<dt>Trend score</dt><dd><strong>" + (v.score || 0) + "</strong></dd>" +
@@ -1968,7 +2016,7 @@ async function p3Refresh() {
     box.innerHTML = pubs.map((p) => "<div class='notif' data-pid='" + esc(p.id) + "'>" +
       "<div class='notif-kind'>" + esc(p.id) + " · " + esc(p.status) + "</div>" +
       "<div class='notif-msg'>media: " + esc(p.media_path || "(chưa tải)") + " · đích: @" + esc(p.account || "—") +
-      " · lịch: " + esc(p.scheduled_at || "ngay") + (p.posted_url ? " · <a href='" + esc(p.posted_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>xem bài đăng</a>" : "") +
+      " · lịch: " + esc(p.scheduled_at || "ngay") + (p.posted_url ? " · <a href='" + esc(p.posted_url) + "' target='_blank' rel='noreferrer' style='color:var(--burgundy-ink)'>xem bài đăng</a>" : "") +
       (p.error ? " · lỗi: " + esc(p.error) : "") + "</div>" +
       "<div class='row'><button class='btn' data-act='pick'>Chọn</button></div></div>").join("");
     box.querySelectorAll("[data-act='pick']").forEach((b) => b.addEventListener("click", () => {
