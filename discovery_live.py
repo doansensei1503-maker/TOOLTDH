@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -57,6 +58,20 @@ MAX_CANDIDATES = 30
 # is searched even when an earlier query already returned videos, so the
 # run covers all sub-clusters instead of stopping after the first query.
 MAX_PER_QUERY = 12
+
+# Retry budget for one query: 1 first try + 2 retries, 3 attempts total.
+# A retry re-reads the SAME query (never a new query) and never duplicates
+# a video (the `seen` set still applies). Retry happens only when the
+# result is empty because of a transient load failure (no payload,
+# timeout, error response, invalid data). A challenge, forced login,
+# access limit or bot block never retries and is reported as BLOCKED.
+MAX_SEARCH_ATTEMPTS = 3
+# Short settle wait before a retry, so the page can stabilize.
+RETRY_SETTLE_SECONDS = 1.0
+# The transient "Try Again" marker on the page. At most one Try Again
+# press per query in the same session, inside the attempt budget.
+TRY_AGAIN_MARKER = "try again"
+_EMPTY_PAYLOAD_REASON = "the search page returned no results payload"
 
 # The metrics the platform publishes for each video.
 KNOWN_METRICS = ("views", "likes", "comments", "shares")
@@ -932,6 +947,171 @@ def build_top5_cards(
     return cards
 
 
+def _is_block_error(message: str) -> bool:
+    """Return True when a failure is a block that must never retry."""
+    lowered = str(message or "").lower()
+    if not lowered.strip():
+        return False
+    return any(
+        marker in lowered
+        for marker in (
+            "captcha",
+            "verify you",
+            "verify to continue",
+            "robot",
+            "security verification",
+            "log in again",
+            "sign in again",
+            "session expired",
+            "access denied",
+            "forbidden",
+            "too many requests",
+            "rate limit",
+            "blocked",
+        )
+    )
+
+
+def _fetch_query_with_retry(
+    term: str,
+    topic: str,
+    *,
+    batch_payload: dict[str, Any] | None,
+    read_search: Callable[[str], dict[str, Any]] | None,
+) -> tuple[list[DiscoveredVideo], int, int, str, str]:
+    """Fetch one query with at most MAX_SEARCH_ATTEMPTS total tries.
+
+    Returns (found, attempt_count, raw_count, final_status, note).
+    A retry re-reads the SAME query on the current tab and never counts as
+    a new query. Retry happens only on transient empty results (no payload,
+    timeout, error response, invalid data). At least one data-valid video
+    stops the retry immediately. A block (CAPTCHA, forced login, access
+    limit, bot block) never retries. A transient "Try Again" marker allows
+    at most one in-session re-read inside the attempt budget.
+    """
+    attempts = 0
+    raw_count = 0
+    found: list[DiscoveredVideo] = []
+    last_reason = ""
+    try_again_used = False
+    final_status = "EMPTY"
+
+    for attempt in range(1, MAX_SEARCH_ATTEMPTS + 1):
+        # Settle wait before a retry, and re-check: a previous attempt that
+        # already yielded data-valid videos never reaches here.
+        if attempt > 1:
+            try:
+                time.sleep(RETRY_SETTLE_SECONDS)
+            except Exception:
+                pass
+        attempts = attempt
+
+        if attempt == 1 and batch_payload is not None:
+            payload = batch_payload or {}
+            html = str(payload.get("html", "") or "")
+            results = str(payload.get("results", "") or "")
+            fetch_error = str(payload.get("error", "") or "").strip()
+            if not results.strip() and fetch_error:
+                last_reason = fetch_error
+                if _is_block_error(fetch_error):
+                    return [], attempts, 0, "BLOCKED", fetch_error
+                if attempt < MAX_SEARCH_ATTEMPTS and read_search is None:
+                    # No reader to retry with; report what happened.
+                    return [], attempts, 0, "EMPTY", last_reason or "empty batched result"
+                if read_search is None:
+                    return [], attempts, 0, "EMPTY", last_reason or "empty batched result"
+                continue
+        else:
+            if read_search is None:
+                break
+            try:
+                payload = read_search(term) or {}
+            except DiscoveryBlockedError as exc:
+                return [], attempts, raw_count, "BLOCKED", str(exc)
+            except DiscoveryError as exc:
+                last_reason = str(exc)
+                if _is_block_error(last_reason):
+                    return [], attempts, raw_count, "BLOCKED", last_reason
+                if attempt < MAX_SEARCH_ATTEMPTS:
+                    continue
+                return [], attempts, raw_count, "EMPTY_AFTER_3_ATTEMPTS", last_reason
+            except Exception as exc:  # noqa: BLE001 - timeouts/errors retry
+                last_reason = f"{type(exc).__name__}: {exc}"
+                if _is_block_error(last_reason):
+                    return [], attempts, raw_count, "BLOCKED", last_reason
+                if attempt < MAX_SEARCH_ATTEMPTS:
+                    continue
+                return [], attempts, raw_count, "EMPTY_AFTER_3_ATTEMPTS", last_reason
+            html = str((payload or {}).get("html", "") or "")
+            results = str((payload or {}).get("results", "") or "")
+            fetch_error = str((payload or {}).get("error", "") or "").strip()
+            if not results.strip() and fetch_error:
+                last_reason = fetch_error
+                if _is_block_error(fetch_error):
+                    return [], attempts, raw_count, "BLOCKED", fetch_error
+                if attempt < MAX_SEARCH_ATTEMPTS:
+                    continue
+                return [], attempts, raw_count, "EMPTY_AFTER_3_ATTEMPTS", last_reason
+
+        # A block on the page never retries.
+        block_reason = _search_block_reason(html, results)
+        if block_reason and block_reason != _EMPTY_PAYLOAD_REASON:
+            return [], attempts, raw_count, "BLOCKED", block_reason
+
+        # Transient "Try Again" marker: at most one in-session re-read,
+        # counted inside the same attempt budget.
+        try:
+            if TRY_AGAIN_MARKER in _visible_text(html) and not try_again_used:
+                try_again_used = True
+                last_reason = "transient 'Try Again' marker; one in-session re-read"
+        except Exception:
+            pass
+
+        # Measure data-valid videos first: any parseable video stops retry.
+        try:
+            raw_items = parse_search_results(results)
+            raw_count = len(raw_items)
+        except DiscoveryBlockedError as exc:
+            return [], attempts, raw_count, "BLOCKED", str(exc)
+        except DiscoveryError as exc:
+            last_reason = str(exc)
+            if _is_block_error(last_reason):
+                return [], attempts, raw_count, "BLOCKED", last_reason
+            if attempt < MAX_SEARCH_ATTEMPTS:
+                continue
+            return [], attempts, raw_count, "EMPTY_AFTER_3_ATTEMPTS", last_reason
+
+        if raw_count >= 1:
+            # Data-valid videos exist: filter by topic and stop, no reopen.
+            try:
+                found = _candidates_from_results(
+                    results, term, topic, max_results=MAX_PER_QUERY
+                )
+            except DiscoveryBlockedError as exc:
+                return [], attempts, raw_count, "BLOCKED", str(exc)
+            except DiscoveryError as exc:
+                last_reason = str(exc)
+                if _is_block_error(last_reason):
+                    return [], attempts, raw_count, "BLOCKED", last_reason
+                if attempt < MAX_SEARCH_ATTEMPTS:
+                    continue
+                return [], attempts, raw_count, "EMPTY_AFTER_3_ATTEMPTS", last_reason
+            if found:
+                return found, attempts, raw_count, "OK", ""
+            return found, attempts, raw_count, "OK_NO_TOPIC_MATCH", "valid data, no topic match"
+        else:
+            # Valid but zero videos, or empty payload: transient until budget ends.
+            if not results.strip():
+                last_reason = _EMPTY_PAYLOAD_REASON
+            else:
+                last_reason = "the search payload carried no video items"
+            if attempt < MAX_SEARCH_ATTEMPTS:
+                continue
+            return [], attempts, 0, "EMPTY_AFTER_3_ATTEMPTS", last_reason
+
+    return [], attempts, raw_count, "EMPTY_AFTER_3_ATTEMPTS", last_reason or "no result"
+
+
 def _posted_date(value: str) -> date | None:
     """Return the posting date of a candidate, or None when it is unknown."""
     stamp = str(value or "").strip()
@@ -1170,41 +1350,33 @@ def discover_new_candidates(
             blockers.append("Đã dừng theo yêu cầu của quản trị viên.")
             break
 
-        # The batched answer is used when the session already searched this
-        # keyword. Otherwise the single keyword reader is used.
-        if term in batch:
-            payload = batch.get(term) or {}
-            results = str(payload.get("results", "") or "")
-            if not results:
-                error = str(payload.get("error", "") or "").strip()
-                blockers.append(
-                    "Blocked: the search for '" + term + "' returned no result"
-                    + (f": {error}" if error else ".")
-                )
-                continue
-            try:
-                found = _candidates_from_results(
-                    results, term, topic, max_results=MAX_PER_QUERY
-                )
-            except DiscoveryBlockedError as exc:
-                blockers.append(str(exc))
-                continue
-            except DiscoveryError as exc:
-                blockers.append(str(exc))
-                continue
-        else:
-            if read_search is None:
-                continue
-            try:
-                found = discover_by_keyword(
-                    term, read_search=read_search, max_results=MAX_PER_QUERY
-                )
-            except DiscoveryBlockedError as exc:
-                blockers.append(str(exc))
-                continue
-            except DiscoveryError as exc:
-                blockers.append(str(exc))
-                continue
+        # One query = at most MAX_SEARCH_ATTEMPTS total tries on the SAME
+        # query and current tab. At least one data-valid video stops the
+        # retry immediately; a block never retries.
+        batch_payload = batch.get(term) if term in batch else None
+        if term not in batch and read_search is None:
+            continue
+        found, attempt_count, raw_count, final_status, note = _fetch_query_with_retry(
+            term, topic, batch_payload=batch_payload, read_search=read_search,
+        )
+        if final_status == "BLOCKED":
+            blockers.append(
+                f"BLOCKED — '{term}': {note}. Không retry, không bypass."
+            )
+            if stats is not None:
+                stats[str(term)] = {
+                    "returned": raw_count,
+                    "added": 0,
+                    "attempt_count": attempt_count,
+                    "raw_count": raw_count,
+                    "final_status": final_status,
+                }
+            continue
+        if final_status == "EMPTY_AFTER_3_ATTEMPTS":
+            blockers.append(
+                f"EMPTY_AFTER_3_ATTEMPTS — '{term}': {note}. "
+                "Không kết luận TikTok không có video."
+            )
         searched.append(term)
         added_this_query = 0
         for candidate in found:
@@ -1230,7 +1402,11 @@ def discover_new_candidates(
             stats[str(term)] = {
                 "returned": len(found),
                 "added": added_this_query,
+                "attempt_count": attempt_count,
+                "raw_count": raw_count,
+                "final_status": final_status,
             }
+        print(f"query='{term}' attempt_count={attempt_count} raw_count={raw_count} final_status={final_status}")
 
     if not searched and blockers:
         # Every keyword was blocked, so the run produced nothing to score.
@@ -1282,6 +1458,7 @@ __all__ = [
     "ITEM_LIST_URL_MARKER",
     "MAX_TOPIC_QUERIES",
     "MAX_PER_QUERY",
+    "MAX_SEARCH_ATTEMPTS",
     "SEARCH_RESULTS_URL_MARKER",
     "SearchFilters",
     "TOP5_LIMIT",
