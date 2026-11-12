@@ -837,6 +837,13 @@ def capture_video_frames(
                     holder.goto(referer, wait_until="domcontentloaded")
                 except Exception:
                     pass
+                try:
+                    # The search/video page re-renders after domcontentloaded
+                    # and wipes nodes appended too early. Let it settle so the
+                    # mounted player below is not destroyed before the shots.
+                    holder.wait_for_timeout(2500)
+                except Exception:
+                    pass
 
             # The player is placed on the page and the browser renders it.
             # The picture is then taken as a screenshot of the player, so
