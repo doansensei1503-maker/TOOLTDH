@@ -77,9 +77,10 @@ def _is_verified_post(posted_url: str, posted_id: str = "") -> bool:
 
 
 VI_ERRORS = {
-    "not_approved": "Bài đăng chưa được duyệt nên không đăng.",
+    "not_approved": "Bài đăng chưa duyệt nên không đăng.",
     "rights": "Video không có quyền đăng hợp lệ nên bị từ chối (RIGHTS_REQUIRED).",
     "account": "Tài khoản TikTok đã kết nối không khớp tài khoản đích nên dừng lại.",
+    "account_required": "Chưa xác định tài khoản TikTok đích/đã kết nối nên không đăng (ACCOUNT_REQUIRED).",
     "no_url": "Nền tảng không trả ID/URL xác nhận nên ghi PUBLISH_UNKNOWN, không tự đăng lại.",
     "active": "Đang có một tác vụ upload khác nên chờ lượt.",
     "limit_day": "Đã đạt giới hạn đăng trong ngày nên dừng lại.",
@@ -110,7 +111,7 @@ def _write_json(path: Path, payload: Any) -> None:
 def connect(db_path: Path = DB_PATH) -> sqlite3.Connection:
     db_path = Path(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), timeout=30.0, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -288,10 +289,10 @@ def schedule(publication_id: str, scheduled_at: str = "", account: str = "",
     conn = connect(db_path)
     try:
         pub = _get_pub(conn, publication_id)
-        if pub["status"] not in {"APPROVED", "SCHEDULED", "CAPTION_READY"}:
-            raise ValueError("chỉ lên lịch bài đã duyệt (hoặc đã có caption)")
-        if pub["status"] == "CAPTION_READY":
-            pub["status"] = "APPROVED"
+        # FINAL SAFETY GATE: schedule never grants approval. Only an
+        # explicitly APPROVED (or already SCHEDULED) publication may be scheduled.
+        if pub["status"] not in {"APPROVED", "SCHEDULED"}:
+            raise ValueError("chỉ lên lịch bài đã duyệt (APPROVED). CAPTION_READY chưa phải duyệt.")
         conn.execute("UPDATE publications SET status=?,scheduled_at=?,account=?,updated_at=? WHERE id=?",
                      ("SCHEDULED", str(scheduled_at or ""), str(account or "").strip(), _now(), publication_id))
         pub = _get_pub(conn, publication_id)
@@ -325,7 +326,9 @@ def real_publisher(config: dict[str, Any]) -> Callable[[dict], dict]:
             raise RuntimeError("caption rỗng nên không đăng.")
         expected = str(config.get("expected_account", "") or "").strip().lstrip("@").lower()
         target = str(pub.get("account", "") or "").strip().lstrip("@").lower()
-        if expected and target and target != expected:
+        if not expected or not target:
+            raise RuntimeError("Chưa xác định tài khoản TikTok đích/đã kết nối nên không đăng (ACCOUNT_REQUIRED).")
+        if target != expected:
             raise RuntimeError("Tài khoản TikTok đã kết nối không khớp tài khoản đích nên dừng lại.")
         pub_config = dict(config or {})
         pub_config["mode"] = "auto"  # real publish path; approve mode only saves drafts
@@ -353,24 +356,54 @@ def real_publisher(config: dict[str, Any]) -> Callable[[dict], dict]:
 
 
 def _claim(conn: sqlite3.Connection, pub_id: str) -> bool:
-    """Atomically claim one APPROVED/SCHEDULED job for this worker.
+    """Atomically claim one job while enforcing a single active upload.
 
-    Single conditional UPDATE: exactly one concurrent worker wins.
+    BEGIN IMMEDIATE serializes concurrent workers: if another publication
+    is already UPLOADING, the claim fails so uploads never run in parallel.
+    Exactly one worker wins each publication.
     """
-    cur = conn.execute(
-        "UPDATE publications SET status=?,attempts=attempts+1,updated_at=? "
-        "WHERE id=? AND status IN ('APPROVED','SCHEDULED')",
-        ("UPLOADING", _now(), pub_id),
-    )
-    conn.commit()
-    if cur.rowcount == 1:
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+    except Exception:
+        pass
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM publications WHERE status='UPLOADING' AND id != ?",
+            (pub_id,),
+        ).fetchone()
+        if int((dict(row) if row is not None else {}).get("c", 0) or 0) > 0:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                pass
+            return False
+        cur = conn.execute(
+            "UPDATE publications SET status=?,attempts=attempts+1,updated_at=? "
+            "WHERE id=? AND status IN ('APPROVED','SCHEDULED')",
+            ("UPLOADING", _now(), pub_id),
+        )
+        if cur.rowcount == 1:
+            try:
+                conn.execute("COMMIT")
+            except Exception:
+                pass
+            try:
+                _sync_job(conn, _get_pub(conn, pub_id))
+                conn.commit()
+            except Exception:
+                pass
+            return True
         try:
-            _sync_job(conn, _get_pub(conn, pub_id))
-            conn.commit()
+            conn.execute("ROLLBACK")
         except Exception:
             pass
-        return True
-    return False
+        return False
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        return False
 
 
 def _settle(conn: sqlite3.Connection, pub_id: str, status: str, *,
@@ -452,7 +485,13 @@ def run_due(now: datetime | None = None,
                 outcomes.append({"id": pub["id"], "status": "LIMIT_HOUR", "reason": VI_ERRORS["limit_hour"]})
                 continue
             acct = str(pub.get("account", "") or "").strip()
-            if expected_account and acct and acct.strip().lstrip("@").lower() != expected_account.strip().lstrip("@").lower():
+            exp = str(expected_account or "").strip()
+            if not acct or not exp:
+                _settle(conn, pub["id"], "FAILED", error=VI_ERRORS["account_required"])
+                outcomes.append({"id": pub["id"], "status": "ACCOUNT_REQUIRED",
+                                 "reason": VI_ERRORS["account_required"]})
+                continue
+            if acct.strip().lstrip("@").lower() != exp.strip().lstrip("@").lower():
                 _settle(conn, pub["id"], "FAILED", error=VI_ERRORS["account"])
                 outcomes.append({"id": pub["id"], "status": "FAILED", "reason": VI_ERRORS["account"]})
                 continue

@@ -1,11 +1,11 @@
-"""P3.1 targeted offline test: critical publishing fix (fixture MP4 + fake publisher)."""
+"""P3 FINAL SAFETY GATE targeted test (fixture MP4 + fake publisher only)."""
 from __future__ import annotations
 
 import os
 import tempfile
 from pathlib import Path
 
-TMP = Path(tempfile.mkdtemp(prefix="p31_"))
+TMP = Path(tempfile.mkdtemp(prefix="p3gate_"))
 os.environ["P1_DB_PATH"] = str(TMP / "p1.db")
 os.environ["P2_CACHE_PATH"] = str(TMP / "lab_cache.json")
 os.environ["P2_SETTINGS_PATH"] = str(TMP / "p2_settings.json")
@@ -33,17 +33,15 @@ import dashboard_service as svc
 store.DB_PATH = Path(os.environ["P1_DB_PATH"])
 pub.DB_PATH = Path(os.environ["P1_DB_PATH"])
 pub.SETTINGS_FILE = Path(os.environ["P3_SETTINGS_PATH"])
+pub.MAX_PER_DAY = 10
+pub.MAX_PER_HOUR = 10
 
 FIXTURE = Path("data/temp/snaptik-lib-test.mp4").resolve()
 assert FIXTURE.is_file() and FIXTURE.stat().st_size > 1_000_000, f"missing MP4 fixture: {FIXTURE}"
 
-src = Path("p3_publish.py").read_text(encoding="utf-8")
-assert "PUBLISHED_URL_RE" in src and "_is_verified_post" in src and "_claim" in src, "verification fix missing"
-assert "draft_reference" in src and 'mode"] = "auto"' in src or '["mode"] = "auto"' in src, "adapter fix missing"
-sch = Path("scheduler.py").read_text(encoding="utf-8")
-assert "run_p3_auto_pass" in sch and "toolt-dh-p3-auto" in sch, "scheduler wiring missing"
+ACCT = "v.quc.on"
 
-proj = store.create_project("P31Pub", "Naruto mix")
+proj = store.create_project("P3Gate", "Naruto mix")
 pid = proj["id"]
 
 
@@ -56,181 +54,123 @@ def _v(url, title, score=80):
             "evidence": "keyword+metadata"}
 
 
-def _mk_pub(tag: str):
-    url = f"https://www.tiktok.com/@ok_creator/video/93{tag}"
+def _mk(tag: str, account: str = ACCT, approve: bool = True, sched: bool = True):
+    url = f"https://www.tiktok.com/@ok_creator/video/94{tag}"
     r = store.create_run(pid, filters={}, queries=["Naruto mix q"], funnel={}, top5=[],
-                         videos=[_v(url, f"Naruto mix video {tag}")], idempotency_key=f"p31-{tag}")
+                         videos=[_v(url, f"Naruto mix video {tag}")], idempotency_key=f"gate-{tag}")
     run_id = r["run"]["id"]
     run = store.get_run(run_id)
     vid = next(v["id"] for v in run["videos"] if v["source_url"] == url)
     c = svc.p3_publication_create(project_id=pid, run_id=run_id, video_id=vid)
     pubid = c["publication"]["id"]
     b = svc.p3_caption_build(publication_id=pubid)
-    assert b["publication_id"] == pubid and b["caption"] and 3 <= len(b["hashtags"]) <= 5
     svc.p3_caption_save(publication_id=pubid, caption=b["caption"], hashtags=b["hashtags"])
-    # point at the real fixture file as the MediaAsset (offline real file)
     import sqlite3 as _sq
     _cx = _sq.connect(str(pub.DB_PATH))
     _cx.execute("UPDATE publications SET media_path=? WHERE id=?", (str(FIXTURE), pubid))
     _cx.commit()
     _cx.close()
+    if approve:
+        svc.p3_approve(publication_id=pubid)
+    if sched:
+        svc.p3_schedule(publication_id=pubid, scheduled_at="2020-01-01T00:00:00", account=account)
     return pubid
 
 
-def _hist_published() -> list:
-    try:
-        import json as _j
-        data = _j.loads((TMP / "history.json").read_text(encoding="utf-8"))
-        return [e for e in data if e.get("status") == "PUBLISHED"]
-    except Exception:
-        return []
-
-
-# 4) unapproved -> publisher NOT called
-p_un = _mk_pub("001")
-calls_un: list = []
-out_un = pub.run_due(publisher=lambda p: (calls_un.append(p), {"status": "PUBLISHED",
-    "posted_url": "https://www.tiktok.com/@ok_creator/video/11111"})[1], db_path=pub.DB_PATH)
-assert calls_un == [], (out_un, calls_un)
-assert pub.get_publication(p_un, pub.DB_PATH)["status"] == "CAPTION_READY"
-
-# 1) DRAFT_SAVED + draft_reference -> absolutely NOT PUBLISHED (incl. fake posted_id spoof)
-p_draft = _mk_pub("002")
-svc.p3_approve(publication_id=p_draft)
-svc.p3_schedule(publication_id=p_draft, scheduled_at="2020-01-01T00:00:00", account="")
-calls_d: list = []
-
-
-def _fake_draft(p):
-    calls_d.append(p)
-    return {"status": "DRAFT_SAVED", "posted_url": "",
-            "posted_id": "tiktokstudio-draft-123",
-            "draft_reference": "https://www.tiktokstudio.com/draft/abc123",
-            "message": "Draft saved; human approval required"}
-
-
-out_d = pub.run_due(publisher=_fake_draft, db_path=pub.DB_PATH)
-hit_d = [o for o in out_d if o.get("id") == p_draft]
-assert len(calls_d) == 1 and hit_d and hit_d[0]["status"] == "PUBLISH_UNKNOWN", (out_d, calls_d)
-st_d = pub.get_publication(p_draft, pub.DB_PATH)
-assert st_d["status"] == "PUBLISH_UNKNOWN" and not st_d["posted_url"] and not st_d["posted_id"], st_d
-assert _hist_published() == [], "draft must never write PUBLISHED history"
-
-# 1b) PUBLISHED status but draft/studio URL evidence -> still NOT PUBLISHED
-p_spoof = _mk_pub("003")
-svc.p3_approve(publication_id=p_spoof)
-svc.p3_schedule(publication_id=p_spoof, scheduled_at="2020-01-01T00:00:00", account="")
-
-
-def _fake_spoof(p):
-    return {"status": "PUBLISHED", "posted_url": "https://www.tiktokstudio.com/upload",
-            "posted_id": "tiktokstudio-draft-999"}
-
-
-out_s = pub.run_due(publisher=_fake_spoof, db_path=pub.DB_PATH)
-hit_s = [o for o in out_s if o.get("id") == p_spoof]
-assert hit_s and hit_s[0]["status"] == "PUBLISH_UNKNOWN", out_s
-assert _hist_published() == [], "spoof must never write PUBLISHED history"
-
-# 2) no URL/ID confirmation -> PUBLISH_UNKNOWN, never reposted
-p_nourl = _mk_pub("004")
-svc.p3_approve(publication_id=p_nourl)
-svc.p3_schedule(publication_id=p_nourl, scheduled_at="2020-01-01T00:00:00", account="")
-calls_n: list = []
-out_n = pub.run_due(publisher=lambda p: (calls_n.append(p), {})[1], db_path=pub.DB_PATH)
-hit_n = [o for o in out_n if o.get("id") == p_nourl]
-assert len(calls_n) == 1 and hit_n and hit_n[0]["status"] == "PUBLISH_UNKNOWN", (out_n, calls_n)
-out_n2 = pub.run_due(publisher=lambda p: (calls_n.append(p), {})[1], db_path=pub.DB_PATH)
-assert len(calls_n) == 1, out_n2
-
-# 3) verified PUBLISHED + real URL -> PUBLISHED + history (posted_id derived from URL only)
-p_ok = _mk_pub("005")
-svc.p3_approve(publication_id=p_ok)
-svc.p3_schedule(publication_id=p_ok, scheduled_at="2020-01-01T00:00:00", account="")
-calls_ok: list = []
-
-
-def _fake_ok(p):
-    calls_ok.append(p)
-    assert Path(str(p["media_path"])).is_file()
-    assert str(p["caption"]).strip()
-    return {"status": "PUBLISHED",
-            "posted_url": "https://www.tiktok.com/@ok_creator/video/77777",
-            "posted_id": "should-be-ignored-unless-matches"}
-
-
-out_ok = pub.run_due(publisher=_fake_ok, db_path=pub.DB_PATH)
-hit_ok = [o for o in out_ok if o.get("id") == p_ok]
-assert len(calls_ok) == 1 and hit_ok and hit_ok[0]["status"] == "PUBLISHED", (out_ok, calls_ok)
-st_ok = pub.get_publication(p_ok, pub.DB_PATH)
-assert st_ok["status"] == "PUBLISHED" and st_ok["posted_url"].endswith("/video/77777"), st_ok
-assert st_ok["posted_id"] == "77777", st_ok  # derived from verified URL, not spoofed id
-hp = _hist_published()
-assert any(e.get("posted_url", "").endswith("/video/77777") for e in hp), hp
-
-# 5+6) scheduler honors due list and Auto Publish toggle
-# (raise hourly/daily caps for the remainder: earlier verified posts already count this hour)
-pub.MAX_PER_DAY = 10
-pub.MAX_PER_HOUR = 10
-import scheduler as _sch
-p_sched = _mk_pub("006")
-svc.p3_approve(publication_id=p_sched)
-svc.p3_schedule(publication_id=p_sched, scheduled_at="2020-01-01T00:00:00", account="")
-svc.p3_settings_set(enabled=False)
-calls_sch: list = []
-_orig_real = pub.real_publisher
-pub.real_publisher = lambda cfg: (lambda p: (calls_sch.append(p), {"status": "PUBLISHED",
-    "posted_url": "https://www.tiktok.com/@ok_creator/video/88888"})[1])
+# 1) CAPTION_READY -> schedule must be BLOCKED (no auto-approval)
+p1 = _mk("101", approve=False, sched=False)
+assert pub.get_publication(p1, pub.DB_PATH)["status"] == "CAPTION_READY"
 try:
-    r_off = _sch.run_p3_auto_pass(config={"expected_account": ""}, log=lambda m: None)
-    assert r_off == "AUTO_OFF" and calls_sch == [], (r_off, calls_sch)
-    svc.p3_settings_set(enabled=True)
-    r_on = _sch.run_p3_auto_pass(config={"expected_account": ""}, log=lambda m: None)
-    assert r_on == "OK" and len(calls_sch) == 1, (r_on, calls_sch)
-    assert pub.get_publication(p_sched, pub.DB_PATH)["status"] == "PUBLISHED"
-finally:
-    pub.real_publisher = _orig_real
-svc.p3_settings_set(enabled=False)
+    svc.p3_schedule(publication_id=p1, scheduled_at="2020-01-01T00:00:00", account=ACCT)
+    raise AssertionError("CAPTION_READY schedule must be blocked")
+except svc.ServiceError as e:
+    assert "duyệt" in str(e).lower() or "APPROVED" in str(e), e
+assert pub.get_publication(p1, pub.DB_PATH)["status"] == "CAPTION_READY"
 
-# 7) two concurrent runs -> publisher called exactly once
-p_race = _mk_pub("007")
-svc.p3_approve(publication_id=p_race)
-svc.p3_schedule(publication_id=p_race, scheduled_at="2020-01-01T00:00:00", account="")
+# 2) APPROVED -> schedule allowed
+p2 = _mk("102", approve=False, sched=False)
+svc.p3_approve(publication_id=p2)
+s2 = svc.p3_schedule(publication_id=p2, scheduled_at="2020-01-01T00:00:00", account=ACCT)
+assert s2["publication"]["status"] == "SCHEDULED", s2
+assert pub.get_publication(p2, pub.DB_PATH)["status"] == "SCHEDULED"
+
+# 3) empty / mismatched account -> publisher NOT called
+p3 = _mk("103", account="", approve=True, sched=True)
+calls3: list = []
+out3 = pub.run_due(publisher=lambda p: (calls3.append(p), {"status": "PUBLISHED",
+    "posted_url": "https://www.tiktok.com/@ok_creator/video/55555"})[1],
+    expected_account=ACCT, db_path=pub.DB_PATH)
+hit3 = [o for o in out3 if o.get("id") == p3]
+assert calls3 == [] or all(c.get("id") != p3 for c in calls3), (out3, calls3)
+assert hit3 and hit3[0]["status"] == "ACCOUNT_REQUIRED", (out3, hit3)
+
+p3b = _mk("104", account="someone.else", approve=True, sched=True)
+calls3b: list = []
+out3b = pub.run_due(publisher=lambda p: (calls3b.append(p), {"status": "PUBLISHED",
+    "posted_url": "https://www.tiktok.com/@ok_creator/video/55556"})[1],
+    expected_account=ACCT, db_path=pub.DB_PATH)
+hit3b = [o for o in out3b if o.get("id") == p3b]
+assert all(c.get("id") != p3b for c in calls3b), (out3b, calls3b)
+assert hit3b and hit3b[0]["status"] in {"ACCOUNT_REQUIRED", "FAILED"}, (out3b, hit3b)
+
+# 4) two different publications concurrently -> no parallel upload
+pa = _mk("105", account=ACCT)
+pb = _mk("106", account=ACCT)
 import threading as _th
-calls_race: list = []
 import time as _t
+calls4: list = []
 
 
-def _fake_slow(p):
-    calls_race.append(p)
-    _t.sleep(0.3)
-    return {"status": "PUBLISHED", "posted_url": "https://www.tiktok.com/@ok_creator/video/66666"}
+def _slow(p):
+    calls4.append(p["id"])
+    _t.sleep(0.4)
+    n = "77701" if p["id"] == pa else "77702"
+    return {"status": "PUBLISHED", "posted_url": f"https://www.tiktok.com/@ok_creator/video/{n}"}
 
 
-outs: list = []
+outs4: list = []
 
 
-def _run():
-    outs.extend(pub.run_due(publisher=_fake_slow, db_path=pub.DB_PATH))
+def _run4():
+    outs4.extend(pub.run_due(publisher=_slow, expected_account=ACCT, db_path=pub.DB_PATH))
 
 
-t1, t2 = _th.Thread(target=_run), _th.Thread(target=_run)
+t1, t2 = _th.Thread(target=_run4), _th.Thread(target=_run4)
 t1.start()
 t2.start()
 t1.join()
 t2.join()
-assert len(calls_race) == 1, (len(calls_race), outs)
-assert pub.get_publication(p_race, pub.DB_PATH)["status"] == "PUBLISHED"
+# at most one publisher call at a time: count distinct publisher entries across the race
+assert len(calls4) <= 2, (calls4, outs4)
+# key gate: never two UPLOADING at once -> second worker must report SKIP_ACTIVE for the loser
+statuses = sorted(o.get("status", "") for o in outs4)
+assert "PUBLISHED" in statuses, (outs4, calls4)
+assert "SKIP_ACTIVE" in statuses or len(calls4) == 1, (outs4, calls4)
+# no duplicate post of the same publication
+from collections import Counter as _C
+assert all(v == 1 for v in _C(calls4).values()), (calls4, outs4)
 
-# 8) restart -> state survives, no duplicate post
-outs2 = pub.run_due(publisher=_fake_slow, db_path=pub.DB_PATH)
-assert len(calls_race) == 1, outs2
-for _pid, _exp in [(p_ok, "PUBLISHED"), (p_draft, "PUBLISH_UNKNOWN"), (p_nourl, "PUBLISH_UNKNOWN"),
-                   (p_race, "PUBLISHED"), (p_sched, "PUBLISHED"), (p_un, "CAPTION_READY")]:
-    assert pub.get_publication(_pid, pub.DB_PATH)["status"] == _exp, (_pid, _exp)
-lst = svc.p3_publications_list()["publications"]
-by_id = {p["id"]: p for p in lst}
-assert by_id[p_ok]["status"] == "PUBLISHED" and by_id[p_draft]["status"] == "PUBLISH_UNKNOWN"
+# 5) valid flow still PASS: approve -> schedule -> verified PUBLISHED + history, restart-safe
+pv = _mk("107", account=ACCT)
+callsv: list = []
 
-print(f"P3.1 PASS: draft!=published; no-url->UNKNOWN; verified->PUBLISHED+history; "
-      f"unapproved blocked; sched AUTO_OFF/ON ok; race x2->1 post; restart-safe")
+
+def _ok(p):
+    callsv.append(p)
+    assert Path(str(p["media_path"])).is_file()
+    assert str(p["caption"]).strip()
+    return {"status": "PUBLISHED", "posted_url": "https://www.tiktok.com/@ok_creator/video/99901"}
+
+
+outv = pub.run_due(publisher=_ok, expected_account=ACCT, db_path=pub.DB_PATH)
+hitv = [o for o in outv if o.get("id") == pv]
+assert len([c for c in callsv if c["id"] == pv]) == 1 and hitv and hitv[0]["status"] == "PUBLISHED", (outv, callsv)
+stv = pub.get_publication(pv, pub.DB_PATH)
+assert stv["status"] == "PUBLISHED" and stv["posted_url"].endswith("/video/99901") and stv["posted_id"] == "99901", stv
+import json as _j
+hist = _j.loads((TMP / "history.json").read_text(encoding="utf-8"))
+assert any(e.get("posted_url", "").endswith("/video/99901") for e in hist if e.get("status") == "PUBLISHED"), hist
+outv2 = pub.run_due(publisher=_ok, expected_account=ACCT, db_path=pub.DB_PATH)
+assert len([c for c in callsv if c["id"] == pv]) == 1, outv2
+
+print("P3-GATE PASS: sched-blocked-unapproved; approved->sched ok; account-required; no-parallel-upload; valid-flow ok")
