@@ -1917,6 +1917,128 @@ def discovery_search(
     return job.to_dict()
 
 
+# ---------------------------------------------------------------- P1 projects
+
+
+def p1_projects_list() -> dict[str, Any]:
+    """List P1 projects (offline, SQLite)."""
+    import project_store as _store
+
+    return {"projects": _store.list_projects()}
+
+
+def p1_project_create(name: str = "", topic: str = "") -> dict[str, Any]:
+    """Create one P1 project per topic (offline, SQLite)."""
+    import project_store as _store
+
+    return {"project": _store.create_project(name, topic)}
+
+
+def p1_runs_list(project_id: str = "") -> dict[str, Any]:
+    """List run versions of one project (offline, SQLite)."""
+    import project_store as _store
+
+    if not str(project_id or "").strip():
+        raise ServiceError("project_id is required.")
+    return {"project_id": project_id, "runs": _store.list_runs(project_id)}
+
+
+def p1_run_get(project_id: str = "", run_id: str = "") -> dict[str, Any]:
+    """Open one saved run version offline (SQLite only, never TikTok)."""
+    import project_store as _store
+
+    if not str(run_id or "").strip():
+        raise ServiceError("run_id is required.")
+    run = _store.get_run(run_id)
+    if project_id and str(run.get("project_id", "")) != str(project_id):
+        raise ServiceError("Run does not belong to this project.")
+    return {"run": run}
+
+
+def p1_search(
+    project_id: str = "",
+    topic: str = "",
+    filters: dict[str, Any] | None = None,
+    retry_key: str = "",
+) -> dict[str, Any]:
+    """Run one P1 search -> new immutable run version (collector = live TikTok).
+
+    Pipeline: plan -> collect -> dedup -> UI filters -> relevance ->
+    trend ranking -> TOP5. No AI. One call creates at most one version;
+    ``retry_key`` makes retries idempotent (no duplicate versions).
+    """
+    import project_store as _store
+    import p1_pipeline as _pipe
+
+    if not str(project_id or "").strip():
+        raise ServiceError("project_id is required.")
+    topic = str(topic or "").strip()
+    if not topic:
+        raise ServiceError("topic is required.")
+    retry_key = str(retry_key or "").strip()
+
+    if retry_key:
+        existing = _store.get_run_by_key(retry_key)
+        if existing is not None:
+            return {"run": existing, "deduplicated": True, "top5": existing.get("top5_json", "[]")}
+
+    def _live_collector(query: str) -> list[dict]:
+        from poster import read_keyword_search
+        from discovery_live import parse_search_results
+
+        payload = read_keyword_search(query)
+        body = str((payload or {}).get("results", "") or "")
+        if not body.strip():
+            return []
+        try:
+            metrics = parse_search_results(body)
+        except Exception:
+            return []
+        out: list[dict] = []
+        for m in metrics:
+            out.append({
+                "source_url": m.source_url,
+                "creator": m.creator,
+                "title": m.title,
+                "views": m.views or 0,
+                "likes": m.likes or 0,
+                "comments": m.comments or 0,
+                "shares": m.shares or 0,
+                "duration_seconds": m.duration_seconds or 0.0,
+                "posted_at": m.posted_at or "",
+                "missing_metrics": list(m.missing_metrics or []),
+            })
+        return out
+
+    result = _pipe.run_pipeline(topic, _live_collector, filters=filters, retry_key=retry_key)
+    saved = _store.create_run(
+        project_id,
+        filters=result["filters"],
+        queries=result["queries"],
+        funnel=result["funnel"],
+        top5=result["top5"],
+        videos=result["videos"],
+        status="COMPLETED",
+        idempotency_key=retry_key,
+    )
+    # Remember as last discovery result so the existing dashboard panels
+    # (TOP5/candidates/detail) keep working with no rewrite.
+    try:
+        _remember_result({
+            "topic": topic,
+            "status": "COMPLETED",
+            "top5": result["top5"],
+            "funnel": result["funnel"],
+            "project_id": project_id,
+            "run_id": saved["run"]["id"],
+            "version": saved["run"]["version"],
+        })
+    except Exception:
+        pass
+    return {"run": saved["run"], "deduplicated": bool(saved.get("deduplicated")), "top5": result["top5"],
+            "funnel": result["funnel"], "queries": result["queries"]}
+
+
 # ---------------------------------------------------------------- review
 
 

@@ -1719,11 +1719,117 @@ function bindEvents() {
 
 async function init() {
   bindEvents();
+  bindP1();
   const hash = location.hash.replace("#", "");
   showView(TITLES[hash] ? hash : "overview");
   await loadOverview();
   loadNotifications();
   setInterval(loadNotifications, 20000);
+}
+
+/* ------------------------------------------------ P1 workspace (offline replay) */
+
+const p1state = { projects: [], runs: [], projectId: "", runId: "" };
+
+async function bindP1() {
+  try {
+    el("btn-p1-create").addEventListener("click", p1Create);
+    el("btn-p1-search").addEventListener("click", p1Search);
+    el("btn-p1-open").addEventListener("click", p1Open);
+    el("p1-project").addEventListener("change", (e) => { p1state.projectId = e.target.value; p1state.runId = ""; loadP1Runs(); });
+    el("p1-run").addEventListener("change", (e) => { p1state.runId = e.target.value; });
+  } catch (_) { /* workspace optional */ }
+  await loadP1Projects();
+}
+
+async function loadP1Projects() {
+  const sel = el("p1-project");
+  if (!sel) return;
+  try {
+    const data = await api("/p1/projects");
+    p1state.projects = data.projects || [];
+    const cur = p1state.projectId;
+    sel.innerHTML = p1state.projects.map((p) =>
+      "<option value='" + esc(p.id) + "'>" + esc(p.name || p.topic) + " · " + esc(p.topic) + "</option>").join("")
+      || "<option value=''>— chưa có project —</option>";
+    if (p1state.projects.some((p) => p.id === cur)) sel.value = cur;
+    p1state.projectId = sel.value || "";
+    await loadP1Runs();
+  } catch (_) { /* offline ok */ }
+}
+
+async function loadP1Runs() {
+  const sel = el("p1-run");
+  if (!sel) return;
+  if (!p1state.projectId) { sel.innerHTML = "<option value=''>—</option>"; return; }
+  try {
+    const data = await api("/p1/runs?project_id=" + encodeURIComponent(p1state.projectId));
+    p1state.runs = data.runs || [];
+    sel.innerHTML = p1state.runs.map((r) =>
+      "<option value='" + esc(r.id) + "'>" + esc(r.version) + " · " + esc(r.created_at || "") + "</option>").join("")
+      || "<option value=''>— chưa có run —</option>";
+    p1state.runId = sel.value || "";
+    const st = el("p1-proj-state");
+    if (st) st.textContent = p1state.runs.length ? p1state.runs.length + " version" : "—";
+  } catch (_) { /* offline ok */ }
+}
+
+async function p1Create() {
+  const topic = (el("p1-new-topic").value || "").trim() || (el("disc-topic").value || "").trim();
+  if (!topic) { toast("Nhập chủ đề project.", "err"); return; }
+  try {
+    const res = await api("/p1/projects", { method: "POST", body: JSON.stringify({ name: topic, topic }) });
+    p1state.projectId = (res.project && res.project.id) || "";
+    toast("Đã tạo project " + topic + ".", "ok");
+    await loadP1Projects();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+function p1Filters() {
+  const g = (id) => (el(id) ? el(id).value : "");
+  return {
+    min_views: Number(g("disc-min-views")) || 0,
+    max_views: Number(g("disc-max-views")) || 0,
+    min_likes: Number(g("disc-min-likes")) || 0,
+    min_comments: Number(g("disc-min-comments")) || 0,
+    min_shares: Number(g("disc-min-shares")) || 0,
+    min_duration: Number(g("disc-min-duration")) || 0,
+    max_duration: Number(g("disc-max-duration")) || 0,
+    max_days: Number(g("disc-days")) || 0,
+    must_include: g("disc-must"), must_include_any: g("disc-must-any"),
+    subtopics: g("disc-subtopics"), exclude: g("disc-exclude"),
+  };
+}
+
+async function p1Search() {
+  if (!p1state.projectId) { toast("Chọn project trước.", "err"); return; }
+  const topic = (el("disc-topic").value || "").trim() || (el("p1-new-topic").value || "").trim();
+  try {
+    toast("Đang tìm kiếm (LIVE TikTok)…", "");
+    const res = await api("/p1/search", { method: "POST", body: JSON.stringify({ project_id: p1state.projectId, topic, filters: p1Filters(), retry_key: "ui-" + Date.now() }) });
+    state.top5 = res.top5 || [];
+    state.funnel = res.funnel || null;
+    state.topicQueries = res.queries || [];
+    renderTop5();
+    toast("Đã lưu version " + ((res.run && res.run.version) || "") + ".", "ok");
+    await loadP1Runs();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function p1Open() {
+  if (!p1state.projectId || !p1state.runId) { toast("Chọn project và version.", "err"); return; }
+  try {
+    const res = await api("/p1/run?project_id=" + encodeURIComponent(p1state.projectId) + "&run_id=" + encodeURIComponent(p1state.runId));
+    const run = res.run || {};
+    let top5 = [];
+    try { top5 = JSON.parse(run.top5_json || "[]"); } catch (_) { top5 = []; }
+    let funnel = {};
+    try { funnel = JSON.parse(run.funnel_json || "{}"); } catch (_) { funnel = {}; }
+    state.top5 = top5;
+    state.funnel = funnel;
+    renderTop5();
+    toast("Đã mở " + (run.version || "") + " offline (không gọi TikTok).", "ok");
+  } catch (e) { toast(e.message, "err"); }
 }
 
 // The hash can change without a click, for example when the browser restores

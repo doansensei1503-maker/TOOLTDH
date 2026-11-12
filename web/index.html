@@ -121,6 +121,29 @@
       <div class="view" data-view="discovery">
         <div class="card">
           <div class="card-head">
+            <h3>Project Workspace (P1)</h3>
+            <span class="tag tag-accent" id="p1-proj-state">—</span>
+          </div>
+          <div class="form-grid">
+            <label>Project
+              <select id="p1-project" class="select-inline"></select>
+            </label>
+            <label>New project topic
+              <input id="p1-new-topic" type="text" placeholder="Naruto">
+            </label>
+            <label>Run version
+              <select id="p1-run" class="select-inline"></select>
+            </label>
+          </div>
+          <div class="row">
+            <button class="btn btn-primary" id="btn-p1-create">Tạo Project</button>
+            <button class="btn btn-primary" id="btn-p1-search">Tìm kiếm (lưu version mới)</button>
+            <button class="btn" id="btn-p1-open">Mở version (offline)</button>
+          </div>
+          <p class="note">Mỗi lần tìm kiếm tạo một Run version mới, không ghi đè. Mở version cũ không gọi TikTok.</p>
+        </div>
+        <div class="card">
+          <div class="card-head">
             <h3>Cấu hình tìm kiếm</h3>
             <span class="tag tag-accent" id="disc-status">IDLE</span>
           </div>
