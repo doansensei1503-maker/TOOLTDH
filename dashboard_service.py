@@ -2096,6 +2096,140 @@ def p2_settings_set(enabled: bool = False) -> dict[str, Any]:
     return _lab.settings_set(bool(enabled))
 
 
+# ---------------------------------------------------------------- P3 publishing
+
+
+def _p3db() -> Any:
+    from pathlib import Path as _P
+
+    import os as _os
+
+    return _P(_os.environ.get("P1_DB_PATH", "data/state/p1_projects.db"))
+
+
+def p3_publications_list() -> dict[str, Any]:
+    import p3_publish as _pub
+
+    return {"publications": _pub.list_publications(_p3db())}
+
+
+def p3_publication_create(project_id: str = "", run_id: str = "", video_id: str = "") -> dict[str, Any]:
+    import p3_publish as _pub
+
+    if not str(project_id or "").strip() or not str(run_id or "").strip() or not str(video_id or "").strip():
+        raise ServiceError("project_id, run_id và video_id là bắt buộc.")
+    try:
+        return _pub.create_publication(project_id, run_id, video_id, _p3db())
+    except KeyError as exc:
+        raise ServiceError(str(exc))
+
+
+def p3_caption_build(publication_id: str = "") -> dict[str, Any]:
+    import p3_publish as _pub
+
+    try:
+        conn_pub = _pub.get_publication(publication_id, _p3db())
+    except KeyError as exc:
+        raise ServiceError(str(exc))
+    import project_store as _store
+
+    run = _store.get_run(str(conn_pub.get("run_id", "")))
+    video = next((v for v in run.get("videos", []) if str(v.get("id", "")) == str(conn_pub.get("video_id", ""))), {})
+    topic = ""
+    try:
+        for _p in _store.list_projects():
+            if str(_p.get("id", "")) == str(conn_pub.get("project_id", "")):
+                topic = str(_p.get("topic", "") or "")
+                break
+    except Exception:
+        topic = ""
+    built = _pub.build_caption(topic, str(video.get("creator", "")), str(video.get("title", "")))
+    return {"publication_id": publication_id, **built}
+
+
+def p3_caption_save(publication_id: str = "", caption: str = "", hashtags: list[str] | None = None) -> dict[str, Any]:
+    import p3_publish as _pub
+
+    try:
+        return {"publication": _pub.save_caption(publication_id, caption, hashtags, _p3db())}
+    except KeyError as exc:
+        raise ServiceError(str(exc))
+    except ValueError as exc:
+        raise ServiceError(str(exc))
+
+
+def p3_approve(publication_id: str = "") -> dict[str, Any]:
+    import p3_publish as _pub
+
+    try:
+        return {"publication": _pub.approve(publication_id, _p3db())}
+    except KeyError as exc:
+        raise ServiceError(str(exc))
+    except ValueError as exc:
+        raise ServiceError(str(exc))
+
+
+def p3_schedule(publication_id: str = "", scheduled_at: str = "", account: str = "") -> dict[str, Any]:
+    import p3_publish as _pub
+
+    try:
+        return {"publication": _pub.schedule(publication_id, scheduled_at, account, _p3db())}
+    except KeyError as exc:
+        raise ServiceError(str(exc))
+    except ValueError as exc:
+        raise ServiceError(str(exc))
+
+
+def _p3_publisher() -> Any:
+    """Return the real publisher adapter without hardcoding browser logic here.
+
+    Uses poster.post_to_tiktok_studio when available; raises otherwise so
+    run_due records FAILED instead of pretending success.
+    """
+    def _publish(pub: dict[str, Any]) -> dict[str, Any]:
+        from poster import post_to_tiktok_studio
+
+        config = _load_config()
+        res = post_to_tiktok_studio(
+            str(pub.get("id", "")), str(pub.get("caption", "")), str(pub.get("media_path", "")),
+            config, approved=True, hashtags=list(pub.get("hashtags", []) or []),
+            keep_browser_open=True, wait_for_user=None,
+        )
+        d = res.to_dict() if hasattr(res, "to_dict") else dict(res or {})
+        url = str(d.get("posted_url", "") or d.get("state", {}).get("posted_url", "") or "").strip()
+        pid = str(d.get("state", {}).get("draft_reference", "") or "").strip()
+        return {"posted_url": url, "posted_id": pid}
+
+    return _publish
+
+
+def p3_run_due() -> dict[str, Any]:
+    """Worker entry: process due publications once (called by scheduler thread too)."""
+    import p3_publish as _pub
+
+    if not _pub.settings_get()["auto_publish"]:
+        return {"status": "AUTO_OFF", "outcomes": [], "reason": "Auto Publish đang TẮT."}
+    settings = _load_settings()
+    if bool(settings.get("emergency_stop", False)):
+        return {"status": "STOPPED", "outcomes": [], "reason": "Emergency stop đang bật."}
+    config = _load_config()
+    expected = str(config.get("expected_account", "") or "").strip().lstrip("@")
+    outcomes = _pub.run_due(publisher=_p3_publisher(), expected_account=expected, db_path=_p3db())
+    return {"status": "OK", "outcomes": outcomes}
+
+
+def p3_settings_get() -> dict[str, Any]:
+    import p3_publish as _pub
+
+    return _pub.settings_get()
+
+
+def p3_settings_set(enabled: bool = False) -> dict[str, Any]:
+    import p3_publish as _pub
+
+    return _pub.settings_set(bool(enabled))
+
+
 # ---------------------------------------------------------------- review
 
 

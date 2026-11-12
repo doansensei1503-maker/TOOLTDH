@@ -1741,8 +1741,15 @@ async function bindP1() {
     if (el("btn-p2-detail")) el("btn-p2-detail").addEventListener("click", p2Detail);
     if (el("btn-p2-analyze")) el("btn-p2-analyze").addEventListener("click", p2Analyze);
     if (el("btn-p2-download")) el("btn-p2-download").addEventListener("click", p2Download);
+    if (el("btn-p3-create")) el("btn-p3-create").addEventListener("click", p3Create);
+    if (el("btn-p3-build")) el("btn-p3-build").addEventListener("click", p3Build);
+    if (el("btn-p3-save")) el("btn-p3-save").addEventListener("click", p3Save);
+    if (el("btn-p3-approve")) el("btn-p3-approve").addEventListener("click", p3Approve);
+    if (el("btn-p3-schedule")) el("btn-p3-schedule").addEventListener("click", p3Schedule);
+    if (el("btn-p3-run")) el("btn-p3-run").addEventListener("click", p3Run);
   } catch (_) { /* workspace optional */ }
   await loadP1Projects();
+  await loadP3Settings();
 }
 
 async function loadP1Projects() {
@@ -1919,6 +1926,126 @@ async function p2Download() {
 }
 
 const _bindP1orig = typeof bindP1 !== "undefined" ? bindP1 : null;
+
+/* ------------------------------------------------ P3 publishing */
+const p3state = { id: "" };
+
+async function loadP3Settings() {
+  try {
+    const s = await api("/p3/settings");
+    if (el("p3-auto")) el("p3-auto").value = s && s.auto_publish ? "on" : "off";
+    if (el("p3-state")) el("p3-state").textContent = (s && s.auto_publish) ? "AUTO PUBLISH ON" : "AUTO OFF";
+  } catch (_) { /* ignore */ }
+  try {
+    const r = await api("/p1/run?project_id=" + encodeURIComponent(p1state.projectId || "") +
+      "&run_id=" + encodeURIComponent(p1state.runId || ""));
+    const vids = (r && r.run && r.run.videos) || [];
+    const sel = el("p3-video");
+    if (sel) sel.innerHTML = vids.map((v) =>
+      "<option value='" + esc(v.id) + "'>#" + (v.rank || "-") + " · @" + esc(v.creator || "") + " · " + esc(v.rights || "?") + "</option>").join("")
+      || "<option value=''>—</option>";
+  } catch (_) { /* ignore */ }
+  await p3Refresh();
+  if (el("p3-auto") && !el("p3-auto").dataset.bound) {
+    el("p3-auto").dataset.bound = "1";
+    el("p3-auto").addEventListener("change", async (e) => {
+      try {
+        await api("/p3/settings", { method: "POST", body: JSON.stringify({ enabled: e.target.value === "on" }) });
+        toast(e.target.value === "on" ? "Đã bật Auto Publish." : "Đã tắt Auto Publish.", "ok");
+      } catch (err) { toast(err.message, "err"); }
+      await loadP3Settings();
+    });
+  }
+}
+
+async function p3Refresh() {
+  try {
+    const res = await api("/p3/publications");
+    const pubs = res.publications || [];
+    const box = el("p3-list");
+    if (!box) return;
+    if (!pubs.length) { box.innerHTML = "<div class='empty'>Chưa có publication.</div>"; return; }
+    box.innerHTML = pubs.map((p) => "<div class='notif' data-pid='" + esc(p.id) + "'>" +
+      "<div class='notif-kind'>" + esc(p.id) + " · " + esc(p.status) + "</div>" +
+      "<div class='notif-msg'>media: " + esc(p.media_path || "(chưa tải)") + " · đích: @" + esc(p.account || "—") +
+      " · lịch: " + esc(p.scheduled_at || "ngay") + (p.posted_url ? " · <a href='" + esc(p.posted_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>xem bài đăng</a>" : "") +
+      (p.error ? " · lỗi: " + esc(p.error) : "") + "</div>" +
+      "<div class='row'><button class='btn' data-act='pick'>Chọn</button></div></div>").join("");
+    box.querySelectorAll("[data-act='pick']").forEach((b) => b.addEventListener("click", () => {
+      const pid = b.closest("[data-pid]").dataset.pid;
+      p3state.id = pid;
+      const p = pubs.find((x) => x.id === pid) || {};
+      if (el("p3-caption")) el("p3-caption").value = p.caption || "";
+      if (el("p3-tags")) el("p3-tags").value = (p.hashtags || []).join("\n");
+      toast("Đã chọn " + pid + " (" + (p.status || "") + ").", "ok");
+    }));
+  } catch (_) { /* ignore */ }
+}
+
+function _p3vid() {
+  return (el("p3-video") && el("p3-video").value) || "";
+}
+
+async function p3Create() {
+  if (!p1state.projectId || !p1state.runId || !_p3vid()) { toast("Chọn project/run/video để tạo publication.", "err"); return; }
+  try {
+    const r = await api("/p3/publication", { method: "POST",
+      body: JSON.stringify({ project_id: p1state.projectId, run_id: p1state.runId, video_id: _p3vid() }) });
+    p3state.id = (r.publication || {}).id || "";
+    toast(r.deduplicated ? "Đã có publication (không trùng): " + p3state.id : "Đã tạo publication: " + p3state.id, "ok");
+  } catch (e) { toast(e.message, "err"); }
+  await p3Refresh();
+}
+
+async function p3Build() {
+  if (!p3state.id) { toast("Tạo/chọn publication trước.", "err"); return; }
+  try {
+    const r = await api("/p3/caption/build", { method: "POST", body: JSON.stringify({ publication_id: p3state.id }) });
+    if (el("p3-caption")) el("p3-caption").value = r.caption || "";
+    if (el("p3-tags")) el("p3-tags").value = (r.hashtags || []).join("\n");
+    toast("Caption tạo từ template (không AI).", "ok");
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function p3Save() {
+  if (!p3state.id) { toast("Tạo/chọn publication trước.", "err"); return; }
+  try {
+    const tags = (el("p3-tags").value || "").split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+    await api("/p3/caption/save", { method: "POST",
+      body: JSON.stringify({ publication_id: p3state.id, caption: el("p3-caption").value || "", hashtags: tags }) });
+    toast("Đã lưu caption.", "ok");
+  } catch (e) { toast(e.message, "err"); }
+  await p3Refresh();
+}
+
+async function p3Approve() {
+  if (!p3state.id) { toast("Tạo/chọn publication trước.", "err"); return; }
+  try {
+    await api("/p3/approve", { method: "POST", body: JSON.stringify({ publication_id: p3state.id }) });
+    toast("Đã duyệt " + p3state.id + " (duyệt ≠ đã đăng).", "ok");
+  } catch (e) { toast(e.message, "err"); }
+  await p3Refresh();
+}
+
+async function p3Schedule() {
+  if (!p3state.id) { toast("Tạo/chọn publication trước.", "err"); return; }
+  try {
+    await api("/p3/schedule", { method: "POST", body: JSON.stringify({
+      publication_id: p3state.id,
+      scheduled_at: (el("p3-schedule") && el("p3-schedule").value) || "",
+      account: (el("p3-account") && el("p3-account").value) || "" }) });
+    toast("Đã đặt lịch.", "ok");
+  } catch (e) { toast(e.message, "err"); }
+  await p3Refresh();
+}
+
+async function p3Run() {
+  try {
+    const r = await api("/p3/run-due", { method: "POST", body: JSON.stringify({}) });
+    toast("Auto Publish: " + (r.status || "") + " · " + (r.outcomes || []).length + " việc.", (r.status === "OK") ? "ok" : "");
+  } catch (e) { toast(e.message, "err"); }
+  await p3Refresh();
+}
 
 // The hash can change without a click, for example when the browser restores
 // a previous view or the user edits the address.

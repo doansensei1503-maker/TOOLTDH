@@ -482,6 +482,39 @@
           <p class="note">Mỗi lần chỉ một job PREPARING/PUBLISHING hoạt động. Mặc định giữ approval mode; chỉ auto-publish khi người dùng bật và quyền hợp lệ.</p>
           <div class="table-wrap"><table class="table" id="sched-queue"></table></div>
         </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h3>Xuất bản P3 (Caption → Duyệt → Lịch → Đăng)</h3>
+            <span class="tag" id="p3-state">—</span>
+          </div>
+          <div class="form-grid">
+            <label>Auto Publish (độc lập Auto Download)
+              <select id="p3-auto" class="select-inline"><option value="off">OFF</option><option value="on">ON</option></select>
+            </label>
+            <label>Video trong run (tạo publication)
+              <select id="p3-video" class="select-inline"></select>
+            </label>
+            <label>Lịch đăng (ISO, để trống = ngay)
+              <input id="p3-schedule" type="text" placeholder="2026-11-13T10:00:00">
+            </label>
+            <label>Tài khoản đích
+              <input id="p3-account" type="text" placeholder="v.quc.on">
+            </label>
+          </div>
+          <div class="row">
+            <button class="btn" id="btn-p3-create">Tạo publication</button>
+            <button class="btn" id="btn-p3-build">Tạo caption (không AI)</button>
+            <button class="btn btn-primary" id="btn-p3-save">Lưu caption</button>
+            <button class="btn btn-primary" id="btn-p3-approve">Duyệt</button>
+            <button class="btn" id="btn-p3-schedule">Đặt lịch</button>
+            <button class="btn btn-primary" id="btn-p3-run">Chạy Auto Publish ngay</button>
+          </div>
+          <label>Caption <textarea id="p3-caption" rows="2"></textarea></label>
+          <label>Hashtags (mỗi dòng một thẻ) <textarea id="p3-tags" rows="2"></textarea></label>
+          <div id="p3-list" class="stack"><div class="empty">Chưa có publication.</div></div>
+          <p class="note">Duyệt gắn đúng publication, duyệt ≠ đã đăng. Chỉ PUBLISHED khi nền tảng trả ID/URL. Mất kết nối → PUBLISH_UNKNOWN, không tự đăng lại.</p>
+        </div>
       </div>
 
       <!-- ============================= STUDIO ============================= -->
