@@ -22,6 +22,8 @@ const state = {
   analyses: [],
   previewUrl: "",
   top5: [],
+  needsReview: [],
+  verification: null,
   topicQueries: [],
   queryStats: {},
   queryTotal: 0,
@@ -334,6 +336,8 @@ async function loadDiscovery() {
       state.analyses = data.analyses || [];
       state.shortfallNote = data.shortfall_note || "";
       state.top5 = data.top5 || [];
+      state.needsReview = data.needs_review || [];
+      state.verification = data.verification || null;
       state.topicQueries = data.topic_queries || [];
       state.queryStats = data.query_stats || {};
       state.queryTotal = data.query_total_returned || 0;
@@ -397,6 +401,22 @@ function fmtAge(value) {
   return n === 1 ? "1 ngày" : n + " ngày";
 }
 
+function renderNeedsReview() {
+  const items = state.needsReview || [];
+  if (!items.length) return "";
+  return '<div class="card" style="margin-top:8px"><strong>Cần xem lại (' + items.length + ")</strong>" +
+    '<div class="muted">Đạt điều kiện metadata nhưng nội dung chưa đủ bằng chứng. Không tự động đăng.</div>' +
+    items.slice(0, 5).map((n) =>
+      "<div class='muted' style='margin-top:6px'><a href='" + esc(n.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>" +
+      esc((n.title || n.source_url || "").slice(0, 80)) + "</a>" +
+      "<div>@" + esc(n.creator || "") + " · " + num(n.views) + " views · đăng " + esc(n.posted_at || "—") +
+      " · điểm xu hướng " + num(n.trend_score ?? n.score ?? 0) + " · quyền: " + esc(n.rights || "—") + "</div>" +
+      "<div>" + esc(n.reason || "") + (n.user_confirmed ? " · ĐÃ XÁC MINH THỦ CÔNG" : "") + "</div>" +
+      "<div class='row' style='margin-top:4px'><button class='btn btn-xs' data-confirm-content='" + esc(n.source_url) + "'>Xác nhận nội dung</button>" +
+      " <button class='btn btn-xs btn-danger' data-dismiss-content='" + esc(n.source_url) + "'>Loại bỏ</button></div></div>"
+    ).join("") + "</div>";
+}
+
 function renderTop5() {
   const box = el("disc-top5");
   if (!box) return;
@@ -404,6 +424,9 @@ function renderTop5() {
   const counter = el("disc-top5-count");
   if (counter) counter.textContent = cards.length ? cards.length + "/5 đề xuất" : "0 đề xuất";
   const meta = [];
+  if (state.verification) {
+    meta.push("VERIFIED " + (state.verification.verified || 0) + " · NEEDS_REVIEW " + (state.verification.needs_review || 0) + " · REJECTED " + (state.verification.rejected || 0));
+  }
   if ((state.topicQueries || []).length) {
     meta.push("Nhóm truy vấn: " + state.topicQueries.join(" · "));
   }
@@ -425,19 +448,35 @@ function renderTop5() {
   }
   box.innerHTML = head + cards.map((c, i) => {
     const pick = !!c.pick;
-    const action = pick
-      ? "<button class='btn btn-xs btn-primary' data-enqueue='" + esc(c.source_url) + "'>Xếp hàng</button>"
-      : "";
+    const status = String(c.status || (c.certainty === "HIGH" ? "VERIFIED" : "NEEDS_REVIEW"));
+    const statusTag = status === "VERIFIED"
+      ? ' <span class="tag tag-ok">VERIFIED</span>'
+      : ' <span class="tag tag-warn">NEEDS_REVIEW</span>';
+    const confirmedTag = c.user_confirmed ? ' <span class="tag tag-accent">ĐÃ XÁC MINH THỦ CÔNG</span>' : "";
+    const posted = c.posted_at ? " · đăng " + esc(c.posted_at) : "";
+    let action = "";
+    if (pick) {
+      action = "<button class='btn btn-xs btn-primary' data-enqueue='" + esc(c.source_url) + "'>Xếp hàng</button>";
+    } else if (status === "NEEDS_REVIEW") {
+      if (c.user_confirmed) {
+        action = "<button class='btn btn-xs btn-primary' data-enqueue='" + esc(c.source_url) + "'>Xếp hàng (đã xác minh thủ công)</button>"
+          + " <button class='btn btn-xs btn-danger' data-dismiss-content='" + esc(c.source_url) + "'>Loại bỏ</button>";
+      } else {
+        action = "<button class='btn btn-xs' data-confirm-content='" + esc(c.source_url) + "'>Xác nhận nội dung</button>"
+          + " <button class='btn btn-xs btn-danger' data-dismiss-content='" + esc(c.source_url) + "'>Loại bỏ</button>";
+      }
+    }
     return "<div class='notif'><div class='notif-kind'>TOP " + (i + 1) + " · " + num(c.score) +
-      " điểm · " + esc(c.certainty || "UNKNOWN") + "</div><div class='notif-msg'>" +
+      " điểm · " + esc(c.certainty || "UNKNOWN") + statusTag + confirmedTag + "</div><div class='notif-msg'>" +
       "<a href='" + esc(c.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--accent)'>" +
       esc((c.title || c.source_url || "").slice(0, 80)) + "</a>" +
-      "<div class='muted'>" + esc(c.creator || "") + " · " + num(c.views) + " views · " +
-      fmtAge(c.age_days) + " · quyền: " + esc(c.rights || "—") + "</div>" +
+      "<div class='muted'>@" + esc(c.creator || "") + " · " + num(c.views) + " views · " +
+      fmtAge(c.age_days) + posted + " · quyền: " + esc(c.rights || "—") + "</div>" +
       "<div>" + esc(c.reason || "") + "</div>" +
+      "<div class='muted'>Không tự động đăng khi chưa xác minh nội dung và quyền.</div>" +
       (action ? "<div class='row' style='margin-top:6px'>" + action + "</div>" : "") +
       "</div></div>";
-  }).join("");
+  }).join("") + renderNeedsReview();
 }
 
 async function loadQueue() {
@@ -476,6 +515,28 @@ async function enqueueTop5(sourceUrl) {
     });
     toast("Đã xếp hàng: " + r.task_id + " (" + r.status + ")", "ok");
     await loadQueue();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function confirmContent(sourceUrl) {
+  try {
+    const r = await api("/discovery/confirm-content", {
+      method: "POST",
+      body: JSON.stringify({ source_url: sourceUrl }),
+    });
+    toast(r.note || "Đã xác minh thủ công.", "ok");
+    await loadDiscovery();
+  } catch (e) { toast(e.message, "err"); }
+}
+
+async function dismissContent(sourceUrl) {
+  try {
+    const r = await api("/discovery/dismiss-content", {
+      method: "POST",
+      body: JSON.stringify({ source_url: sourceUrl }),
+    });
+    toast(r.note || "Đã loại bỏ.", "ok");
+    await loadDiscovery();
   } catch (e) { toast(e.message, "err"); }
 }
 
@@ -1037,6 +1098,8 @@ async function pollJob(jobId) {
       state.analyses = detail.analyses || [];
       state.shortfallNote = detail.shortfall_note || "";
       state.top5 = detail.top5 || [];
+      state.needsReview = detail.needs_review || [];
+      state.verification = detail.verification || null;
       state.topicQueries = detail.topic_queries || [];
       state.queryStats = detail.query_stats || {};
       state.queryTotal = detail.query_total_returned || 0;
@@ -1608,7 +1671,11 @@ function bindEvents() {
   if (top5box) {
     top5box.addEventListener("click", (e) => {
       const btn = e.target.closest("[data-enqueue]");
-      if (btn) enqueueTop5(btn.dataset.enqueue);
+      if (btn) { enqueueTop5(btn.dataset.enqueue); return; }
+      const confirm = e.target.closest("[data-confirm-content]");
+      if (confirm) { confirmContent(confirm.dataset.confirmContent); return; }
+      const dismiss = e.target.closest("[data-dismiss-content]");
+      if (dismiss) dismissContent(dismiss.dataset.dismissContent);
     });
   }
   // The AI analysis panel carries its own preview, approve and reject

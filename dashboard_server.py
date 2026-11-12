@@ -38,6 +38,8 @@ def _route(method: str, path: str) -> Callable[..., Any] | None:
         ("POST", "/api/discovery/stop"): service.discovery_stop,
         ("POST", "/api/discovery/approve"): service.discovery_approve,
         ("POST", "/api/discovery/reject"): service.discovery_reject,
+        ("POST", "/api/discovery/confirm-content"): service.discovery_confirm_content,
+        ("POST", "/api/discovery/dismiss-content"): service.discovery_dismiss_content,
         ("GET", "/api/discovery/last"): service.discovery_last,
         ("GET", "/api/discovery/detail"): service.discovery_detail,
         ("POST", "/api/discovery/reanalyze"): service.reanalyze_with_media,

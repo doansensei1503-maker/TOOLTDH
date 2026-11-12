@@ -851,8 +851,10 @@ def build_top5_cards(
     """Build at most TOP 5 candidate cards from ranked trending scores.
 
     Weights are untouched (scores come from `score_all_trending`). Duplicates
-    and videos without enough evidence are skipped; the list is never forced
-    to 5. No growth rate is invented — only real views/age/score are shown.
+    and rejected videos are skipped; the list is never forced to 5. Videos
+    whose metadata passed but whose content verdict is UNKNOWN stay visible
+    as NEEDS_REVIEW with pick=False, so they can never auto-post. No growth
+    rate is invented — only real views/age/score are shown.
     """
     cards: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -881,11 +883,15 @@ def build_top5_cards(
         if not url or url in seen:
             continue
         seen.add(url)
-        # Insufficient-evidence videos never become recommendations.
+        # REJECTED videos (content_relevant is False) never become cards.
+        # UNKNOWN videos stay visible as NEEDS_REVIEW with pick=False, so
+        # they can never auto-post; only a manual user confirmation plus
+        # the rights/approval gates can move them forward.
         analysis = analyses_by_url.get(url)
         content_relevant = getattr(analysis, "content_relevant", None) if analysis is not None else None
         if content_relevant is False:
             continue
+        status = "VERIFIED" if content_relevant is True else "NEEDS_REVIEW"
         certainty = "UNKNOWN"
         if content_relevant is True:
             certainty = "HIGH"
@@ -894,11 +900,16 @@ def build_top5_cards(
         age = candidate_age_days(video)
         rights = rights_status_of(url, config)
         pick = getattr(item, "decision", "") == "ACCEPT"
+        if status != "VERIFIED":
+            # NEEDS_REVIEW never auto-posts, even with a high trend score.
+            pick = False
         reason = str(getattr(item, "reason", "") or "").strip()
         if analysis is not None:
             extra = str(getattr(analysis, "summary", "") or getattr(analysis, "content_relevance_reason", "") or "").strip()
             if extra:
                 reason = (reason + " | " + extra).strip(" |") if reason else extra
+        if status == "NEEDS_REVIEW" and "chưa đủ dữ liệu" not in reason.lower() and "unknown" not in reason.lower():
+            reason = (reason + " | NEEDS_REVIEW: đạt metadata, chờ người dùng xác minh nội dung").strip(" |")
         if rights != "ALLOWLISTED_PERMITTED":
             pick = False
             reason = (reason + " | quyền: " + rights).strip(" |") if reason else ("quyền: " + rights)
@@ -906,10 +917,12 @@ def build_top5_cards(
             "source_url": url,
             "creator": str(getattr(video, "creator", "") or ""),
             "title": str(getattr(video, "title", "") or ""),
+            "posted_at": str(getattr(video, "posted_at", "") or ""),
             "views": int(getattr(video, "views", 0) or 0),
             "age_days": age,
             "score": int(getattr(item, "score", 0) or 0),
             "certainty": certainty,
+            "status": status,
             "pick": pick,
             "reason": reason or ("chọn" if pick else "loại: chưa đủ điều kiện"),
             "rights": rights,

@@ -514,8 +514,36 @@ def queue_enqueue(source_url: str = "", task_id: str = "") -> dict[str, Any]:
     card = next((c for c in top5 if str(c.get("source_url", "")) == wanted), None)
     if card is None:
         raise ServiceError("Video không nằm trong TOP 5 đề xuất nên không xếp hàng.")
+    # Safety gate: NEEDS_REVIEW never queues on model evidence alone. Only
+    # a manual user confirmation (stored separately from the model verdict)
+    # plus allowlisted rights can lift it to the queue; the approval gates
+    # before download/publish still apply downstream.
+    if str(card.get("status", "")) == "NEEDS_REVIEW" and not card.get("user_confirmed"):
+        try:
+            _cmap = _read_json(STATE_DIR / "discovery_content_confirm.json", {}) or {}
+        except Exception:
+            _cmap = {}
+        _entry = _cmap.get(wanted, {}) if isinstance(_cmap, dict) else {}
+        if not (isinstance(_entry, dict) and _entry.get("user_confirmed") is True):
+            raise ServiceError(
+                "Video NEEDS_REVIEW chưa được người dùng xác minh nội dung nên không xếp hàng. "
+                f"Lý do: {card.get('reason', '')}"
+            )
     if not card.get("pick"):
-        raise ServiceError(f"Video chưa đủ điều kiện xếp hàng: {card.get('reason', '')}")
+        # A user-confirmed NEEDS_REVIEW with allowlisted rights may queue:
+        # its pick flag stays False (it never auto-posts), but the manual
+        # queue action is the explicit human approval for this step.
+        _confirmed = bool(card.get("user_confirmed"))
+        if not _confirmed:
+            try:
+                _cmap2 = _read_json(STATE_DIR / "discovery_content_confirm.json", {}) or {}
+            except Exception:
+                _cmap2 = {}
+            _e2 = _cmap2.get(wanted, {}) if isinstance(_cmap2, dict) else {}
+            _confirmed = bool(isinstance(_e2, dict) and _e2.get("user_confirmed") is True)
+        _rights_ok = str(card.get("rights", "")) == "ALLOWLISTED_PERMITTED"
+        if not (_confirmed and _rights_ok and str(card.get("status", "")) == "NEEDS_REVIEW"):
+            raise ServiceError(f"Video chưa đủ điều kiện xếp hàng: {card.get('reason', '')}")
     queue = PublishQueue()
     tasks = queue.load()
     for existing in tasks:
@@ -835,45 +863,92 @@ def _discovery_request(
     # provider can be finished without searching TikTok again.
     all_candidates = list(candidates)
 
-    # The content check is the gate. A video only stays a candidate when
-    # its real content shows AI Music. A video whose content was judged and
-    # does not show it is dropped, with the reason kept. A video whose
-    # content could not be read is dropped too, because a caption that
-    # says "AI" is not evidence.
+    # The content check is the gate. VERIFIED (content_relevant is True)
+    # stays eligible for auto-select. NEEDS_REVIEW (content_relevant is
+    # None) passed the metadata filters but has no content proof: it stays
+    # visible and scored, but can never auto-post — only a manual user
+    # confirmation plus the rights/approval gates can move it forward.
+    # REJECTED (content_relevant is False, or no analysis) is dropped.
+    # Captions/hashtags/"AI" text are never treated as content proof.
     relevant_urls = {
         item.source_url
         for item in analyses
         if item.content_relevant is True
     }
+    from discovery_live import candidate_age_days as _age_days
     dropped: list[Any] = []
-    kept_candidates: list[Any] = []
+    verified_candidates: list[Any] = []
+    needs_review_candidates: list[Any] = []
+    needs_review_info: list[dict[str, Any]] = []
     for candidate in candidates:
         analysis = analysis_by_url.get(candidate.source_url)
         if analysis is None:
             dropped.append(candidate)
+            blockers.append(
+                f"REJECTED — @{candidate.creator}: không có kết quả phân tích nội dung."
+            )
             continue
         if analysis.content_relevant is True:
-            kept_candidates.append(candidate)
+            verified_candidates.append(candidate)
             continue
-        dropped.append(candidate)
+        if analysis.content_relevant is False:
+            dropped.append(candidate)
+            reason = (
+                analysis.content_relevance_reason
+                or analysis.insufficient_reason
+                or "không đủ dữ liệu nội dung"
+            )
+            reason = "nội dung thật không phải AI Music — " + reason
+            blockers.append(f"REJECTED — @{candidate.creator}: {reason}")
+            continue
+        # UNKNOWN: keep for NEEDS_REVIEW (metadata already passed here).
+        needs_review_candidates.append(candidate)
         reason = (
             analysis.content_relevance_reason
             or analysis.insufficient_reason
             or "không đủ dữ liệu nội dung"
         )
-        if analysis.content_relevant is False:
-            reason = "nội dung thật không phải AI Music — " + reason
-        else:
-            reason = "CHƯA ĐỦ DỮ LIỆU — " + reason
-        blockers.append(f"Loại do kiểm tra nội dung — @{candidate.creator}: {reason}")
+        posted = str(getattr(candidate, "posted_at", "") or "")
+        try:
+            age_days = _age_days(candidate)
+        except Exception:
+            age_days = None
+        needs_review_info.append({
+            "source_url": candidate.source_url,
+            "creator": str(getattr(candidate, "creator", "") or ""),
+            "title": str(getattr(candidate, "title", "") or ""),
+            "views": int(getattr(candidate, "views", 0) or 0),
+            "posted_at": posted,
+            "age_days": age_days,
+            "reason": "CHƯA ĐỦ DỮ LIỆU — " + reason,
+        })
+        blockers.append(
+            f"NEEDS_REVIEW — @{candidate.creator}: đạt metadata, {reason}. "
+            "Chờ người dùng xác minh, không tự đăng."
+        )
 
-    # The candidates that survived the content check are the only ones the
-    # filter stage and the dashboard see.
-    candidates = kept_candidates
+    # Only VERIFIED + NEEDS_REVIEW reach the trending scorer. Weights are
+    # untouched; NEEDS_REVIEW keeps its real views/age/score for display.
+    candidates = list(verified_candidates) + list(needs_review_candidates)
 
     selection = filter_and_select(
         candidates, config, topic=topic, filters=search_filters, known_urls=known_urls
     )
+    # Safety gate: auto-select only ever considers VERIFIED content.
+    # NEEDS_REVIEW keeps its real trend score for display in TOP 5 but can
+    # never become `selection.selected`, so no auto-post/scheduler path can
+    # pick it up. Only a manual user confirmation + rights/approval gates
+    # (via discovery_approve) can move it forward.
+    try:
+        _verified_urls = {c.source_url for c in verified_candidates}
+        if selection.selected is not None and selection.selected.source_url not in _verified_urls:
+            selection.selected = None
+            selection.selected_score = None
+            from discover import STATUS_NO_QUALIFIED_VIDEO as _NOQ
+            if selection.status != _NOQ:
+                selection.status = _NOQ
+    except Exception:
+        pass
 
     # The AI content analysis decides which video is the best one. The
     # trending score that the filter stage computed stays as the secondary
@@ -948,13 +1023,29 @@ def _discovery_request(
     try:
         from discovery_live import TOP5_LIMIT, build_top5_cards, language_market_note
 
-        result["top5"] = build_top5_cards(
+        top5_cards = build_top5_cards(
             list(selection.scores or []),
             config,
             analyses_by_url=analysis_by_url,
             limit=TOP5_LIMIT,
             subtopics=list(search_filters.subtopics or []),
         )
+        # Attach manual content-confirmation state (stored separately from
+        # model evidence) so the dashboard can show it. NEEDS_REVIEW cards
+        # keep pick=False: they never auto-post.
+        try:
+            _confirm_map = _read_json(STATE_DIR / "discovery_content_confirm.json", {}) or {}
+        except Exception:
+            _confirm_map = {}
+        if not isinstance(_confirm_map, dict):
+            _confirm_map = {}
+        for card in top5_cards:
+            try:
+                entry = _confirm_map.get(str(card.get("source_url", "")), {})
+                card["user_confirmed"] = bool(isinstance(entry, dict) and entry.get("user_confirmed") is True)
+            except Exception:
+                card["user_confirmed"] = False
+        result["top5"] = top5_cards
         note = language_market_note(search_filters)
         if note:
             result["language_market_note"] = note
@@ -980,6 +1071,44 @@ def _discovery_request(
     result["analyses"] = [item.to_dict() for item in analyses]
     result["candidate_count"] = len(candidates)
     result["candidate_limit"] = MAX_CANDIDATES
+    # Explicit verification buckets: VERIFIED can auto-advance through the
+    # gates; NEEDS_REVIEW passed metadata but has no content proof and can
+    # never auto-post; REJECTED failed metadata or is confirmed non-AI.
+    try:
+        _score_by_url = {
+            s.video.source_url: int(s.score or 0)
+            for s in (selection.scores or [])
+            if getattr(s, "video", None) is not None
+        }
+    except Exception:
+        _score_by_url = {}
+    try:
+        _confirm_map = _read_json(STATE_DIR / "discovery_content_confirm.json", {}) or {}
+    except Exception:
+        _confirm_map = {}
+    if not isinstance(_confirm_map, dict):
+        _confirm_map = {}
+    try:
+        from discovery_live import rights_status_of as _rights_of
+        for _info in needs_review_info:
+            try:
+                _entry = _confirm_map.get(str(_info.get("source_url", "")), {})
+                _info["user_confirmed"] = bool(isinstance(_entry, dict) and _entry.get("user_confirmed") is True)
+            except Exception:
+                _info["user_confirmed"] = False
+            _info["trend_score"] = int(_score_by_url.get(str(_info.get("source_url", "")), 0) or 0)
+            try:
+                _info["rights"] = _rights_of(str(_info.get("source_url", "")), config)
+            except Exception:
+                _info["rights"] = "UNKNOWN"
+    except Exception:
+        pass
+    result["needs_review"] = list(needs_review_info)
+    result["verification"] = {
+        "verified": len(verified_candidates),
+        "needs_review": len(needs_review_candidates),
+        "rejected": len(dropped),
+    }
     # The full list of the run is kept next to the qualified candidates, so
     # a resume can reuse it without searching TikTok again.
     result["all_candidates"] = [item.to_dict() for item in all_candidates]
@@ -1286,6 +1415,87 @@ def discovery_reject(source_url: str, reason: str = "") -> dict[str, Any]:
     }
 
 
+def discovery_confirm_content(source_url: str = "") -> dict[str, Any]:
+    """Record a manual user content confirmation for a NEEDS_REVIEW video.
+
+    The confirmation is stored separately from model evidence: analyses
+    keep content_relevant=None, while this store records user_confirmed.
+    Nothing is downloaded; rights/approval gates still apply downstream.
+    """
+    wanted = str(source_url or "").strip()
+    if not wanted:
+        raise ServiceError("Không có URL video để xác nhận.")
+    result = _LAST_RESULT or _load_last_result()
+    if not isinstance(result, dict) or not result:
+        raise ServiceError("No discovery result is available to confirm.")
+    top5 = result.get("top5", []) if isinstance(result, dict) else []
+    needs = result.get("needs_review", []) if isinstance(result, dict) else []
+    known = {str(c.get("source_url", "")) for c in (list(top5) + list(needs))}
+    if wanted not in known:
+        raise ServiceError("Video không nằm trong danh sách NEEDS_REVIEW.")
+    card = next((c for c in top5 if str(c.get("source_url", "")) == wanted), None)
+    if card is not None and str(card.get("status", "")) == "VERIFIED":
+        raise ServiceError("Video đã VERIFIED, không cần xác nhận thủ công.")
+    store = STATE_DIR / "discovery_content_confirm.json"
+    try:
+        current = _read_json(store, {}) or {}
+    except Exception:
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+    current[wanted] = {
+        "source_url": wanted,
+        "user_confirmed": True,
+        "confirmed_at": datetime.now().isoformat(),
+        "confirmed_by": "admin",
+    }
+    _write_json(store, current)
+    # Reflect in the live result without touching model evidence.
+    try:
+        for c in result.get("top5", []) or []:
+            if str(c.get("source_url", "")) == wanted:
+                c["user_confirmed"] = True
+        for n in result.get("needs_review", []) or []:
+            if str(n.get("source_url", "")) == wanted:
+                n["user_confirmed"] = True
+        _remember_result(result)
+    except Exception:
+        pass
+    return {"source_url": wanted, "user_confirmed": True, "downloaded": False,
+            "note": "Đã ghi nhận xác minh thủ công. Vẫn cần quyền và approval trước khi tải/đăng."}
+
+
+def discovery_dismiss_content(source_url: str = "", reason: str = "") -> dict[str, Any]:
+    """Record a manual dismissal of a NEEDS_REVIEW video (no download)."""
+    wanted = str(source_url or "").strip()
+    if not wanted:
+        raise ServiceError("Không có URL video để loại bỏ.")
+    result = _LAST_RESULT or _load_last_result()
+    if not isinstance(result, dict) or not result:
+        raise ServiceError("No discovery result is available.")
+    note = str(reason or "").strip() or "Người dùng loại bỏ sau khi xem NEEDS_REVIEW."
+    store = STATE_DIR / "discovery_content_confirm.json"
+    try:
+        current = _read_json(store, {}) or {}
+    except Exception:
+        current = {}
+    if not isinstance(current, dict):
+        current = {}
+    current[wanted] = {
+        "source_url": wanted,
+        "user_confirmed": False,
+        "dismissed": True,
+        "dismiss_reason": note,
+        "dismissed_at": datetime.now().isoformat(),
+    }
+    _write_json(store, current)
+    _write_json(REJECTIONS_FILE, {**(_read_json(REJECTIONS_FILE, {}) or {}), wanted: {
+        "source_url": wanted, "reason": note,
+        "rejected_at": datetime.now().isoformat(), "downloaded": False}})
+    return {"source_url": wanted, "dismissed": True, "downloaded": False,
+            "note": "Đã loại bỏ video. Chưa tải và không đăng."}
+
+
 def discovery_stop(job_id: str) -> dict[str, Any]:
     """Ask a running discovery to stop.
 
@@ -1367,6 +1577,16 @@ def discovery_detail(source_url: str = "") -> dict[str, Any]:
         if isinstance(item, dict) and str(item.get("source_url", "")) == wanted:
             candidate = item
             break
+    # NEEDS_REVIEW videos stay visible in TOP 5 / needs_review even when
+    # they are not the selected candidate, so look there too.
+    if candidate is None:
+        for key in ("needs_review", "top5", "all_candidates"):
+            for item in result.get(key, []) or []:
+                if isinstance(item, dict) and str(item.get("source_url", "")) == wanted:
+                    candidate = item
+                    break
+            if candidate is not None:
+                break
 
     # The selected video is reported separately, so it is found even when
     # the candidate list does not carry it.
@@ -1398,12 +1618,44 @@ def discovery_detail(source_url: str = "") -> dict[str, Any]:
     if isinstance(eligibility, dict) and str(eligibility.get("source_url", "")) != wanted:
         eligibility = {"checked": False, "note": "Chưa kiểm tra khả năng tải cho video này."}
 
+    analysis = None
+    for item in result.get("analyses", []) or []:
+        if isinstance(item, dict) and str(item.get("source_url", "")) == wanted:
+            analysis = item
+            break
+    verification = "REJECTED"
+    try:
+        for c in result.get("top5", []) or []:
+            if isinstance(c, dict) and str(c.get("source_url", "")) == wanted:
+                verification = str(c.get("status", "")) or verification
+                break
+        if verification == "REJECTED":
+            for n in result.get("needs_review", []) or []:
+                if isinstance(n, dict) and str(n.get("source_url", "")) == wanted:
+                    verification = "NEEDS_REVIEW"
+                    break
+        if isinstance(analysis, dict) and analysis.get("content_relevant") is True:
+            verification = "VERIFIED"
+    except Exception:
+        pass
+    try:
+        _cmap = _read_json(STATE_DIR / "discovery_content_confirm.json", {}) or {}
+    except Exception:
+        _cmap = {}
+    _entry = _cmap.get(wanted, {}) if isinstance(_cmap, dict) else {}
+    user_confirmed = bool(isinstance(_entry, dict) and _entry.get("user_confirmed") is True)
+    if isinstance(candidate, dict) and not candidate.get("user_confirmed") and user_confirmed:
+        candidate = {**candidate, "user_confirmed": True}
+
     return {
         "source_url": wanted,
         "topic": str(result.get("topic", "")),
         "run_status": str(result.get("status", "")),
         "candidate": candidate,
         "score": score,
+        "analysis": analysis,
+        "verification_status": verification,
+        "user_confirmed": user_confirmed,
         "selected": bool(
             isinstance(selected, dict) and str(selected.get("source_url", "")) == wanted
         ),
