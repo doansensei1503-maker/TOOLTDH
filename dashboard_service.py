@@ -114,6 +114,10 @@ JOBS = JobRegistry()
 _STOP_LOCK = threading.Lock()
 _STOP_REQUESTED: set[str] = set()
 
+# Per-query collection stats of the last discovery run (returned videos vs
+# kept videos per query). Reported in the result as `query_stats`.
+_LAST_QUERY_STATS: dict[str, Any] = {}
+
 
 def _read_json(path: Path, default: Any) -> Any:
     """Read a JSON file, returning the default when it is missing or broken."""
@@ -678,13 +682,42 @@ def _discovery_request(
         # The candidates are read without the filters here. The filter stage in
         # `filter_and_select` applies them once and records the reason for every
         # candidate it removes.
+        collect_stats: dict[str, Any] = {}
         candidates, blockers = discover_new_candidates(
             config,
             topic,
             read_search=_read,
             read_searches=_read_many,
             should_stop=_should_stop,
+            stats=collect_stats,
         )
+        try:
+            result_query_stats = dict(collect_stats)
+        except Exception:
+            result_query_stats = {}
+        # Cheap metadata filters (views, age, keywords) run BEFORE the heavy
+        # frame/Vision analysis, so a video already disqualified by views or
+        # recency never costs a frame download. The later filter_and_select
+        # re-applies the same filters idempotently on the content survivors.
+        try:
+            from discovery_live import apply_search_filters as _prefilter
+
+            pre_kept, pre_dropped = _prefilter(list(candidates), search_filters)
+            for reason in pre_dropped:
+                blockers.append(f"Loại theo bộ lọc — {reason}")
+            prefilter_note = (
+                f"Thu thập {len(candidates)} video từ {len(result_query_stats)} truy vấn; "
+                f"lọc metadata giữ {len(pre_kept)}, loại {len(pre_dropped)} trước phân tích nội dung."
+            )
+            blockers.append(prefilter_note)
+            candidates = pre_kept
+        except Exception:
+            result_query_stats = result_query_stats
+        try:
+            global _LAST_QUERY_STATS
+            _LAST_QUERY_STATS = dict(result_query_stats)
+        except Exception:
+            pass
 
     # The videos that are already in the library are not offered again.
     known_urls = set()
@@ -927,11 +960,18 @@ def _discovery_request(
             result["language_market_note"] = note
             all_blockers.append(note)
         try:
-            from discovery_live import expand_topic_queries as _expand_q
+            from discovery_live import MAX_TOPIC_QUERIES, expand_topic_queries as _expand_q
 
-            result["topic_queries"] = _expand_q(topic, max_queries=5) or [topic]
+            result["topic_queries"] = _expand_q(topic, max_queries=MAX_TOPIC_QUERIES) or [topic]
         except Exception:
             result["topic_queries"] = [topic]
+        try:
+            result["query_stats"] = dict(_LAST_QUERY_STATS)
+            stats_total = sum(int((v or {}).get("returned", 0)) for v in _LAST_QUERY_STATS.values())
+            result["query_total_returned"] = stats_total
+        except Exception:
+            result["query_stats"] = {}
+            result["query_total_returned"] = 0
     except Exception:
         result.setdefault("top5", [])
     result["mode"] = str(_load_settings().get("mode", config.get("mode", "approve")))

@@ -23,6 +23,8 @@ const state = {
   previewUrl: "",
   top5: [],
   topicQueries: [],
+  queryStats: {},
+  queryTotal: 0,
   langMarketNote: "",
   queue: null,
 };
@@ -333,6 +335,8 @@ async function loadDiscovery() {
       state.shortfallNote = data.shortfall_note || "";
       state.top5 = data.top5 || [];
       state.topicQueries = data.topic_queries || [];
+      state.queryStats = data.query_stats || {};
+      state.queryTotal = data.query_total_returned || 0;
       state.langMarketNote = data.language_market_note || "";
       setRunStatus(data.status);
     }
@@ -402,6 +406,11 @@ function renderTop5() {
   const meta = [];
   if ((state.topicQueries || []).length) {
     meta.push("Nhóm truy vấn: " + state.topicQueries.join(" · "));
+  }
+  if (state.queryTotal) {
+    const parts = Object.entries(state.queryStats || {}).map(([q, s]) =>
+      q + ": " + (s.returned || 0) + " trả về/" + (s.added || 0) + " giữ");
+    meta.push("TikTok trả " + state.queryTotal + " video (" + parts.join("; ") + ")");
   }
   if (state.langMarketNote) {
     meta.push(state.langMarketNote);
@@ -1029,6 +1038,8 @@ async function pollJob(jobId) {
       state.shortfallNote = detail.shortfall_note || "";
       state.top5 = detail.top5 || [];
       state.topicQueries = detail.topic_queries || [];
+      state.queryStats = detail.query_stats || {};
+      state.queryTotal = detail.query_total_returned || 0;
       state.langMarketNote = detail.language_market_note || "";
       setRunStatus(detail.status);
       renderDiscovery();

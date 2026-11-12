@@ -51,7 +51,12 @@ DEFAULT_SEARCH_TOPICS = ("AI Music", "AI Song", "AI Cover", "AI Remix")
 # related videos; when the search does not offer enough, fewer are returned
 # and the shortfall is reported. The list is never filled up with a video
 # that is not related to the topic.
-MAX_CANDIDATES = 10
+MAX_CANDIDATES = 30
+
+# How many videos one query may contribute. Every query in the expansion
+# is searched even when an earlier query already returned videos, so the
+# run covers all sub-clusters instead of stopping after the first query.
+MAX_PER_QUERY = 12
 
 # The metrics the platform publishes for each video.
 KNOWN_METRICS = ("views", "likes", "comments", "shares")
@@ -107,7 +112,8 @@ HUMAN_MUSIC_WORDS = frozenset(
 )
 
 # The topic words that carry no meaning for the AI requirement.
-_TOPIC_NOISE = frozenset({"music", "song", "sound", "audio", "track", "beat"})
+_TOPIC_NOISE = frozenset({"music", "song", "sound", "audio", "track", "beat",
+                           "generated", "generate", "generation", "generative"})
 
 # The words that name a medium other than music. A video whose AI work is
 # clearly about one of these is not an AI music video, even when its caption
@@ -133,12 +139,12 @@ TUTORIAL_WORDS = frozenset(
 
 # Sub-query clusters for the AI Music subject. Generic topics never use
 # this list; only a topic that names both the AI signal and the music
-# market expands to it.
+# market expands to it. At most MAX_TOPIC_QUERIES queries run per lượt.
 AI_MUSIC_SUBQUERIES = (
-    "AI song", "AI cover", "AI remix", "Suno music", "Udio song",
+    "AI Cover", "AI Remix", "Suno AI Song", "Udio Music", "AI Generated Song",
 )
 
-MAX_TOPIC_QUERIES = 5
+MAX_TOPIC_QUERIES = 6
 
 
 def is_tutorial_title(title: str) -> bool:
@@ -1054,6 +1060,7 @@ def discover_new_candidates(
     filters: SearchFilters | None = None,
     should_stop: Callable[[], bool] | None = None,
     exclude_creators: set[str] | None = None,
+    stats: dict[str, Any] | None = None,
 ) -> tuple[list[DiscoveredVideo], list[str]]:
     """Discover the public videos for the topic from a TikTok keyword search.
 
@@ -1164,7 +1171,7 @@ def discover_new_candidates(
                 continue
             try:
                 found = _candidates_from_results(
-                    results, term, topic, max_results=max_results
+                    results, term, topic, max_results=MAX_PER_QUERY
                 )
             except DiscoveryBlockedError as exc:
                 blockers.append(str(exc))
@@ -1177,7 +1184,7 @@ def discover_new_candidates(
                 continue
             try:
                 found = discover_by_keyword(
-                    term, read_search=read_search, max_results=max_results
+                    term, read_search=read_search, max_results=MAX_PER_QUERY
                 )
             except DiscoveryBlockedError as exc:
                 blockers.append(str(exc))
@@ -1186,7 +1193,12 @@ def discover_new_candidates(
                 blockers.append(str(exc))
                 continue
         searched.append(term)
+        added_this_query = 0
         for candidate in found:
+            if len(candidates) >= max_results:
+                # Global cap reached: remaining queries are still searched
+                # (stats kept) but nothing more is added.
+                break
             if candidate.source_url in seen:
                 continue
             if candidate.creator.lower().lstrip("@") in blocked_creators:
@@ -1194,10 +1206,18 @@ def discover_new_candidates(
                 continue
             seen.add(candidate.source_url)
             candidates.append(candidate)
+            added_this_query += 1
+            # One query contributes at most MAX_PER_QUERY videos; the loop
+            # continues with the next query so every sub-cluster is covered.
+            if added_this_query >= MAX_PER_QUERY:
+                break
             if len(candidates) >= max_results:
                 break
-        if len(candidates) >= max_results:
-            break
+        if stats is not None:
+            stats[str(term)] = {
+                "returned": len(found),
+                "added": added_this_query,
+            }
 
     if not searched and blockers:
         # Every keyword was blocked, so the run produced nothing to score.
@@ -1248,6 +1268,7 @@ __all__ = [
     "DiscoveryBlockedError",
     "ITEM_LIST_URL_MARKER",
     "MAX_TOPIC_QUERIES",
+    "MAX_PER_QUERY",
     "SEARCH_RESULTS_URL_MARKER",
     "SearchFilters",
     "TOP5_LIMIT",
