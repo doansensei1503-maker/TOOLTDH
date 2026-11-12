@@ -656,6 +656,9 @@ def _discovery_request(
     config["discovery"] = discovery_config
 
     search_filters = SearchFilters.from_payload(filters)
+    funnel_raw = 0
+    funnel_dedup = 0
+    funnel_filtered = 0
 
     def _read(keyword: str) -> dict[str, Any]:
         return read_keyword_search(keyword)
@@ -706,6 +709,12 @@ def _discovery_request(
         blockers = [
             "Tái dùng kết quả tìm kiếm đã lưu, không tìm kiếm lại TikTok."
         ]
+        try:
+            funnel_raw = len(candidates)
+            funnel_dedup = len(candidates)
+            funnel_filtered = len(candidates)
+        except Exception:
+            pass
     else:
         # The candidates are read without the filters here. The filter stage in
         # `filter_and_select` applies them once and records the reason for every
@@ -727,6 +736,43 @@ def _discovery_request(
         # frame/Vision analysis, so a video already disqualified by views or
         # recency never costs a frame download. The later filter_and_select
         # re-applies the same filters idempotently on the content survivors.
+        # Funnel: RAW = videos TikTok returned (sum raw_count),
+        # DEDUP = unique videos collected (canonical ID/URL only).
+        try:
+            _raw_total = 0
+            for _v in (result_query_stats or {}).values():
+                try:
+                    _raw_total += int((_v or {}).get("raw_count", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+            funnel_raw = _raw_total
+        except Exception:
+            funnel_raw = 0
+        funnel_dedup = len(candidates)
+        # Strict gate FIRST (never lowered): views>=5000, 30-60s, age<=30d.
+        # A 20s / 135d video NEVER enters FILTERED/VERIFIED/NEEDS_REVIEW/TOP5.
+        try:
+            from discovery_live import passes_strict_metadata as _strict_ok
+
+            _strict_kept: list[Any] = []
+            for _c in list(candidates):
+                try:
+                    _ok, _why = _strict_ok(_c)
+                except Exception:
+                    _ok, _why = False, "strict check failed"
+                if _ok:
+                    _strict_kept.append(_c)
+                else:
+                    blockers.append(
+                        f"REJECTED strict — {getattr(_c, 'source_url', '')}: {_why}"
+                    )
+            blockers.append(
+                f"Funnel RAW {funnel_raw} → DEDUP {funnel_dedup} → "
+                f"FILTERED {len(_strict_kept)} (strict 5000 views/30-60s/<=30d)."
+            )
+            candidates = _strict_kept
+        except Exception:
+            pass
         try:
             from discovery_live import apply_search_filters as _prefilter
 
@@ -741,6 +787,10 @@ def _discovery_request(
             candidates = pre_kept
         except Exception:
             result_query_stats = result_query_stats
+        try:
+            funnel_filtered = len(candidates)
+        except Exception:
+            funnel_filtered = 0
         try:
             global _LAST_QUERY_STATS
             _LAST_QUERY_STATS = dict(result_query_stats)
@@ -1113,6 +1163,23 @@ def _discovery_request(
         "needs_review": len(needs_review_candidates),
         "rejected": len(dropped),
     }
+    # Funnel counts: RAW (TikTok) → DEDUP (canonical ID/URL) →
+    # FILTERED (strict metadata) → VERIFIED / NEEDS_REVIEW.
+    try:
+        _funnel = {
+            "raw": int(funnel_raw or 0),
+            "dedup": int(funnel_dedup or 0),
+            "filtered": int(funnel_filtered or 0),
+            "verified": int(len(verified_candidates)),
+            "needs_review": int(len(needs_review_candidates)),
+            "rejected": int(len(dropped)),
+        }
+    except Exception:
+        _funnel = {
+            "raw": 0, "dedup": 0, "filtered": 0,
+            "verified": 0, "needs_review": 0, "rejected": 0,
+        }
+    result["funnel"] = _funnel
     # The full list of the run is kept next to the qualified candidates, so
     # a resume can reuse it without searching TikTok again.
     result["all_candidates"] = [item.to_dict() for item in all_candidates]

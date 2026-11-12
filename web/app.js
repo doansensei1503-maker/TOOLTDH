@@ -27,6 +27,7 @@ const state = {
   topicQueries: [],
   queryStats: {},
   queryTotal: 0,
+  funnel: null,
   appliedFilters: null,
   langMarketNote: "",
   queue: null,
@@ -342,6 +343,7 @@ async function loadDiscovery() {
       state.topicQueries = data.topic_queries || [];
       state.queryStats = data.query_stats || {};
       state.queryTotal = data.query_total_returned || 0;
+      state.funnel = data.funnel || null;
       state.appliedFilters = data.applied_filters || data.filters || null;
       state.langMarketNote = data.language_market_note || "";
       setRunStatus(data.status);
@@ -426,6 +428,10 @@ function renderTop5() {
   const counter = el("disc-top5-count");
   if (counter) counter.textContent = cards.length ? cards.length + "/5 đề xuất" : "0 đề xuất";
   const meta = [];
+  if (state.funnel) {
+    const fl = state.funnel;
+    meta.push("Funnel RAW " + (fl.raw || 0) + " → DEDUP " + (fl.dedup || 0) + " → FILTERED " + (fl.filtered || 0) + " → VERIFIED " + (fl.verified || 0) + "/NEEDS_REVIEW " + (fl.needs_review || 0));
+  }
   if (state.verification) {
     meta.push("VERIFIED " + (state.verification.verified || 0) + " · NEEDS_REVIEW " + (state.verification.needs_review || 0) + " · REJECTED " + (state.verification.rejected || 0));
   }
@@ -1114,6 +1120,7 @@ async function pollJob(jobId) {
       state.topicQueries = detail.topic_queries || [];
       state.queryStats = detail.query_stats || {};
       state.queryTotal = detail.query_total_returned || 0;
+      state.funnel = detail.funnel || null;
       state.appliedFilters = detail.applied_filters || detail.filters || null;
       state.langMarketNote = detail.language_market_note || "";
       setRunStatus(detail.status);

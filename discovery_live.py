@@ -839,6 +839,58 @@ def _filter_reason(candidate: DiscoveredVideo, filters: "SearchFilters") -> str:
 
 TOP5_LIMIT = 5
 
+# Strict metadata gate for TOP 5 (task requirement, never lowered):
+# views >= 5000, 30s <= duration <= 60s, age <= 30 days.
+# A video failing any of these NEVER enters FILTERED / VERIFIED /
+# NEEDS_REVIEW / TOP 5, even with manual user confirmation.
+STRICT_MIN_VIEWS = 5000
+STRICT_MIN_DURATION = 30.0
+STRICT_MAX_DURATION = 60.0
+STRICT_MAX_DAYS = 30
+
+
+def canonical_video_key(url: str) -> str:
+    """Return the canonical dedup key for a video (ID or normalized URL).
+
+    Only identical videos share a key: the numeric TikTok video ID when
+    present, otherwise the normalized URL (lowercased, trailing slash
+    stripped). Similar captions never deduplicate.
+    """
+    raw = str(url or "").strip().lower().rstrip("/")
+    if not raw:
+        return ""
+    import re as _re
+
+    match = _re.search(r"/video/(\d+)", raw)
+    if match:
+        return "id:" + match.group(1)
+    return "url:" + raw
+
+
+def passes_strict_metadata(candidate: "DiscoveredVideo") -> tuple[bool, str]:
+    """Return (True, '') when the candidate passes the strict metadata gate."""
+    try:
+        views = int(getattr(candidate, "views", 0) or 0)
+    except (TypeError, ValueError):
+        views = 0
+    if views < STRICT_MIN_VIEWS:
+        return False, f"views {views} < {STRICT_MIN_VIEWS}"
+    try:
+        duration = float(getattr(candidate, "duration_seconds", 0) or 0.0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    unknown = set(getattr(candidate, "missing_metrics", None) or [])
+    if "duration" in unknown or not duration:
+        return False, "duration UNKNOWN"
+    if duration < STRICT_MIN_DURATION or duration > STRICT_MAX_DURATION:
+        return False, f"duration {duration:.1f}s outside 30-60s"
+    age = candidate_age_days(candidate)
+    if age is None:
+        return False, "age UNKNOWN"
+    if age > STRICT_MAX_DAYS:
+        return False, f"age {age}d > {STRICT_MAX_DAYS}d"
+    return True, ""
+
 
 def candidate_age_days(candidate: "DiscoveredVideo") -> int | None:
     """Return the age of a candidate in days, or None when unknown."""
@@ -909,7 +961,11 @@ def build_top5_cards(
 
     ordered = sorted(
         list(scored or []),
-        key=lambda item: (_sub_priority(getattr(item, "video", None)), int(getattr(item, "score", 0) or 0)),
+        key=lambda item: (
+            1 if getattr(analyses_by_url.get(str(getattr(getattr(item, "video", None), "source_url", "") or "").strip()), "content_relevant", None) is True else 0,
+            _sub_priority(getattr(item, "video", None)),
+            int(getattr(item, "score", 0) or 0),
+        ),
         reverse=True,
     )
     for item in ordered:
@@ -920,6 +976,15 @@ def build_top5_cards(
         if not url or url in seen:
             continue
         seen.add(url)
+        # Strict metadata gate: 20s / 135d (or any views<5000,
+        # duration outside 30-60s, age>30d) NEVER enters TOP 5,
+        # even with manual user confirmation. No threshold lowering.
+        try:
+            _ok, _why = passes_strict_metadata(video)
+        except Exception:
+            _ok, _why = False, "strict check failed"
+        if not _ok:
+            continue
         # REJECTED videos (content_relevant is False) never become cards.
         # UNKNOWN videos stay visible as NEEDS_REVIEW with pick=False, so
         # they can never auto-post; only a manual user confirmation plus
@@ -1333,6 +1398,12 @@ def discover_new_candidates(
         )
 
     seen = {str(url) for url in (known_urls or set())}
+    # Canonical dedup keys: only identical videos share a key (video ID or
+    # normalized URL). Similar captions never deduplicate.
+    try:
+        _seen_keys = {canonical_video_key(str(url)) for url in (known_urls or set())}
+    except Exception:
+        _seen_keys = set(seen)
     candidates: list[DiscoveredVideo] = []
     blockers: list[str] = []
     searched: list[str] = []
@@ -1408,11 +1479,20 @@ def discover_new_candidates(
                 # Global cap reached: remaining queries are still searched
                 # (stats kept) but nothing more is added.
                 break
-            if candidate.source_url in seen:
+            # Strict dedup: only identical videos share a key (video ID or
+            # normalized URL). Similar captions never deduplicate.
+            try:
+                _key = canonical_video_key(candidate.source_url)
+            except Exception:
+                _key = str(candidate.source_url or "").strip().lower()
+            if not _key:
+                _key = str(candidate.source_url or "").strip().lower()
+            if _key in _seen_keys:
                 continue
             if candidate.creator.lower().lstrip("@") in blocked_creators:
                 # The account of the admin is never offered as a trend.
                 continue
+            _seen_keys.add(_key)
             seen.add(candidate.source_url)
             candidates.append(candidate)
             added_this_query += 1
@@ -1490,6 +1570,8 @@ __all__ = [
     "apply_search_filters",
     "build_top5_cards",
     "candidate_age_days",
+    "canonical_video_key",
+    "passes_strict_metadata",
     "discover_by_keyword",
     "discover_new_candidates",
     "expand_topic_queries",
