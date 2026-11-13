@@ -143,11 +143,23 @@ def _write_json(path: Path, payload: Any) -> Path:
 # ---------------------------------------------------------------- overview
 
 
+def _bundle_dir() -> Path:
+    """Bundle dir for frozen exe, source dir otherwise (P4-B1 portable)."""
+    import sys as _sys
+
+    if getattr(_sys, "frozen", False):
+        meipass = getattr(_sys, "_MEIPASS", "")
+        if meipass:
+            return Path(meipass)
+        return Path(_sys.executable).resolve().parent / "_internal"
+    return Path(__file__).resolve().parent
+
+
 def _load_config() -> dict[str, Any]:
     """Load the project configuration."""
     import yaml
 
-    config_path = Path(__file__).with_name("config.yaml")
+    config_path = _bundle_dir() / "config.yaml"
     if not config_path.exists():
         return {}
     try:
@@ -749,30 +761,9 @@ def _discovery_request(
         except Exception:
             funnel_raw = 0
         funnel_dedup = len(candidates)
-        # Strict gate FIRST (never lowered): views>=5000, 30-60s, age<=30d.
-        # A 20s / 135d video NEVER enters FILTERED/VERIFIED/NEEDS_REVIEW/TOP5.
-        try:
-            from discovery_live import passes_strict_metadata as _strict_ok
-
-            _strict_kept: list[Any] = []
-            for _c in list(candidates):
-                try:
-                    _ok, _why = _strict_ok(_c)
-                except Exception:
-                    _ok, _why = False, "strict check failed"
-                if _ok:
-                    _strict_kept.append(_c)
-                else:
-                    blockers.append(
-                        f"REJECTED strict — {getattr(_c, 'source_url', '')}: {_why}"
-                    )
-            blockers.append(
-                f"Funnel RAW {funnel_raw} → DEDUP {funnel_dedup} → "
-                f"FILTERED {len(_strict_kept)} (strict 5000 views/30-60s/<=30d)."
-            )
-            candidates = _strict_kept
-        except Exception:
-            pass
+        # NO hidden strict gate here. The only filters that can reject a
+        # candidate are the ones the user actually set. There is no fixed
+        # 5000-view / 30-60s / 30-day threshold anywhere in the pipeline.
         try:
             from discovery_live import apply_search_filters as _prefilter
 
@@ -1927,6 +1918,105 @@ def p1_projects_list() -> dict[str, Any]:
     return {"projects": _store.list_projects()}
 
 
+def p1_project_summary() -> dict[str, Any]:
+    """Per-project counts for the workspace list.
+
+    Read-only aggregation over SQLite plus the publish history. A post only
+    counts as published when the platform returned a verified URL, so
+    PUBLISH_UNKNOWN is never counted as published.
+    """
+    import project_store as _store
+
+    projects = _store.list_projects()
+    history = _history_entries()
+    published_ids = {
+        str(item.get("publication_id") or item.get("id") or "")
+        for item in history
+        if item.get("status") == "PUBLISHED" and str(item.get("posted_url") or item.get("url") or "")
+    }
+    try:
+        import p3_publish as _pub
+
+        publications = _pub.list_publications(_p3db())
+    except Exception:
+        publications = []
+    pubs_by_project: dict[str, list[dict[str, Any]]] = {}
+    for pub in publications:
+        pubs_by_project.setdefault(str(pub.get("project_id", "")), []).append(pub)
+
+    rows: list[dict[str, Any]] = []
+    for project in projects:
+        pid = str(project.get("id", ""))
+        runs = _store.list_runs(pid)
+        pubs = pubs_by_project.get(pid, [])
+        pending = len(
+            [p for p in pubs if str(p.get("status", "")) in {"DRAFT", "CAPTION_READY"}]
+        )
+        blockers = len([p for p in pubs if str(p.get("status", "")) in {"RIGHTS_REQUIRED", "FAILED"}])
+        verified = len(
+            [p for p in pubs if str(p.get("status", "")) == "PUBLISHED" and str(p.get("posted_url", ""))]
+        )
+        latest = str(project.get("created_at", ""))
+        for run in runs:
+            if str(run.get("created_at", "")) > latest:
+                latest = str(run.get("created_at", ""))
+        rows.append(
+            {
+                "id": pid,
+                "name": str(project.get("name", "")),
+                "topic": str(project.get("topic", "")),
+                "created_at": str(project.get("created_at", "")),
+                "latest_activity": latest,
+                "versions": len(runs),
+                "publications": len(pubs),
+                "published_verified": verified,
+                "pending_approval": pending,
+                "blockers": blockers,
+            }
+        )
+    return {"projects": rows}
+
+
+def p1_project_detail(project_id: str = "") -> dict[str, Any]:
+    """Everything one project owns, scoped by project_id."""
+    if not str(project_id or "").strip():
+        raise ServiceError("project_id is required.")
+    import project_store as _store
+
+    runs = _store.list_runs(project_id)
+    videos: list[dict[str, Any]] = []
+    for run in runs:
+        try:
+            videos.extend(_store.get_run(str(run.get("id", ""))).get("videos", []))
+        except Exception:
+            continue
+    try:
+        import p3_publish as _pub
+
+        publications = [
+            p
+            for p in _pub.list_publications(_p3db())
+            if str(p.get("project_id", "")) == str(project_id)
+        ]
+    except Exception:
+        publications = []
+    project: dict[str, Any] = {}
+    try:
+        project = next(
+            (p for p in _store.list_projects() if str(p.get("id", "")) == str(project_id)),
+            {},
+        )
+    except Exception:
+        project = {}
+    return {
+        "project_id": project_id,
+        "project": project,
+        "runs": runs,
+        "videos": videos,
+        "publications": publications,
+    }
+
+
 def p1_project_create(name: str = "", topic: str = "") -> dict[str, Any]:
     """Create one P1 project per topic (offline, SQLite)."""
     import project_store as _store
@@ -1955,17 +2045,39 @@ def p1_run_get(project_id: str = "", run_id: str = "") -> dict[str, Any]:
     return {"run": run}
 
 
+def p1_plan_preview(topic: str = "") -> dict[str, Any]:
+    """Return the generated query plan for a topic, without searching.
+
+    The plan is built by the same deterministic planner the run uses, so
+    what the user inspects here is exactly what the run will search. No
+    source is contacted and no run is created.
+    """
+    import p1_pipeline as _pipe
+
+    topic = str(topic or "").strip()
+    if not topic:
+        raise ServiceError("topic is required.")
+    plan = _pipe.plan_queries(topic)
+    return {"plan": plan, "queries": plan.get("queries", [])}
+
+
 def p1_search(
     project_id: str = "",
     topic: str = "",
     filters: dict[str, Any] | None = None,
     retry_key: str = "",
+    custom_queries: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run one P1 search -> new immutable run version (collector = live TikTok).
 
     Pipeline: plan -> collect -> dedup -> UI filters -> relevance ->
     trend ranking -> TOP5. No AI. One call creates at most one version;
     ``retry_key`` makes retries idempotent (no duplicate versions).
+
+    The live collector uses the one-session batch reader, so one run uses
+    one Chrome session and one tab for every planned query. The source
+    evidence is reported per query; a blocked source is never bypassed and
+    never reported as a successful search.
     """
     import project_store as _store
     import p1_pipeline as _pipe
@@ -1982,18 +2094,42 @@ def p1_search(
         if existing is not None:
             return {"run": existing, "deduplicated": True, "top5": existing.get("top5_json", "[]")}
 
+    # The batch reader is filled once, before the pipeline runs, so every
+    # planned query is searched in the same browser session and tab.
+    batch_payloads: dict[str, dict[str, Any]] = {}
+
+    def _fill_batch(queries: list[str]) -> None:
+        try:
+            from poster import read_keyword_searches
+        except Exception:
+            return
+        try:
+            collected = read_keyword_searches(queries)
+        except Exception:
+            # The reader itself failed. The pipeline then reads each query
+            # one by one, and each failure is classified and reported.
+            return
+        if isinstance(collected, dict):
+            batch_payloads.update(collected)
+
     def _live_collector(query: str) -> list[dict]:
-        from poster import read_keyword_search
         from discovery_live import parse_search_results
 
-        payload = read_keyword_search(query)
+        payload = batch_payloads.get(query)
+        if payload is None:
+            from poster import read_keyword_search
+            payload = read_keyword_search(query)
         body = str((payload or {}).get("results", "") or "")
+        error = str((payload or {}).get("error", "") or "").strip()
+        if error:
+            raise RuntimeError(error)
         if not body.strip():
+            # An empty but valid payload is an empty result, not an error.
             return []
         try:
             metrics = parse_search_results(body)
-        except Exception:
-            return []
+        except Exception as exc:  # noqa: BLE001 - the reason is reported
+            raise RuntimeError(f"Parser error: {type(exc).__name__}: {exc}") from exc
         out: list[dict] = []
         for m in metrics:
             out.append({
@@ -2010,7 +2146,36 @@ def p1_search(
             })
         return out
 
-    result = _pipe.run_pipeline(topic, _live_collector, filters=filters, retry_key=retry_key)
+    # The plan is built first so the batch reader knows every query.
+    plan = _pipe.plan_queries(topic)
+    planned = [str(spec.get("query", "")) for spec in plan.get("queries", []) if spec.get("query")]
+    if custom_queries:
+        edited = [str(q).strip() for q in custom_queries if str(q).strip()]
+        if edited:
+            planned = edited[:_pipe.QUERY_HARD_CEILING]
+    if planned:
+        _fill_batch(planned)
+
+    result = _pipe.run_pipeline(
+        topic,
+        _live_collector,
+        filters=filters,
+        retry_key=retry_key,
+        custom_queries=custom_queries,
+    )
+
+    # The run keeps the whole research dataset: the plan, the candidate
+    # pool, the filter decisions, the per-query diagnostics and the
+    # scoring evidence. Historical runs stay readable.
+    snapshot_extra = {
+        "plan": result.get("plan", {}),
+        "query_outcomes": result.get("query_outcomes", []),
+        "candidates": result.get("candidates", []),
+        "filter_decisions": result.get("filter_decisions", []),
+        "status_reason": result.get("status_reason", ""),
+        "collector": "tiktok_public_keyword_search",
+        "schema": "p1-search-v2",
+    }
     saved = _store.create_run(
         project_id,
         filters=result["filters"],
@@ -2018,25 +2183,39 @@ def p1_search(
         funnel=result["funnel"],
         top5=result["top5"],
         videos=result["videos"],
-        status="COMPLETED",
+        status=result.get("status", "COMPLETED_WITH_RESULTS"),
         idempotency_key=retry_key,
+        snapshot_extra=snapshot_extra,
     )
     # Remember as last discovery result so the existing dashboard panels
     # (TOP5/candidates/detail) keep working with no rewrite.
     try:
         _remember_result({
             "topic": topic,
-            "status": "COMPLETED",
+            "status": result.get("status", "COMPLETED_WITH_RESULTS"),
+            "status_reason": result.get("status_reason", ""),
             "top5": result["top5"],
             "funnel": result["funnel"],
+            "queries": result["queries"],
+            "query_outcomes": result.get("query_outcomes", []),
             "project_id": project_id,
             "run_id": saved["run"]["id"],
             "version": saved["run"]["version"],
         })
     except Exception:
         pass
-    return {"run": saved["run"], "deduplicated": bool(saved.get("deduplicated")), "top5": result["top5"],
-            "funnel": result["funnel"], "queries": result["queries"]}
+    return {
+        "run": saved["run"],
+        "deduplicated": bool(saved.get("deduplicated")),
+        "top5": result["top5"],
+        "funnel": result["funnel"],
+        "queries": result["queries"],
+        "plan": result.get("plan", {}),
+        "query_outcomes": result.get("query_outcomes", []),
+        "candidates": result.get("candidates", []),
+        "status": result.get("status", "COMPLETED_WITH_RESULTS"),
+        "status_reason": result.get("status_reason", ""),
+    }
 
 
 # ---------------------------------------------------------------- P2 video lab

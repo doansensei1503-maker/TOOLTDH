@@ -168,3 +168,10 @@ nohup.out
 *.tgz
 *.rar
 *.7z
+
+# ---- the scratch files of the local development loop ------------------------
+# The temporary server log and the temporary copies of the browser
+# screenshot that were made while the checkpoint was prepared.
+_srv.log
+_srv.err
+_p1_overview.png

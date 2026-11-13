@@ -151,12 +151,503 @@ function emptyRow(colspan, text) {
   return '<tr><td colspan="' + colspan + '" class="empty">' + esc(text) + "</td></tr>";
 }
 
+/* P4-A.2 friendly labels: never show raw backend enums in the UI. */
+function friendlyRights(rights) {
+  const r = String(rights || "").toUpperCase();
+  if (r === "ALLOWLISTED_PERMITTED") return "Đã cấp quyền";
+  if (r === "RIGHTS_REQUIRED" || r === "NEEDS_PERMISSION_REVIEW") return "Chưa có quyền";
+  if (!rights) return "—";
+  return String(rights);
+}
+
+function friendlyPubStatus(status) {
+  const s = String(status || "").toUpperCase();
+  if (s === "PUBLISH_UNKNOWN") return "Chưa xác nhận đăng";
+  if (s === "PUBLISHED") return "Đã đăng";
+  if (s === "CAPTION_READY") return "Sẵn sàng duyệt";
+  if (s === "DRAFT") return "Bản nháp";
+  if (s === "APPROVED") return "Đã duyệt";
+  if (s === "SCHEDULED") return "Đã lên lịch";
+  if (s === "UPLOADING") return "Đang đăng";
+  if (s === "RIGHTS_REQUIRED") return "Cần xác minh quyền";
+  if (s === "FAILED") return "Có lỗi";
+  if (!status) return "—";
+  return String(status);
+}
+
+function toLocalInput(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + "T" + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+function fromLocalInput(local) {
+  if (!local) return "";
+  const d = new Date(local);
+  if (Number.isNaN(d.getTime())) return String(local);
+  return d.toISOString();
+}
+
+function friendlySchedule(iso) {
+  if (!iso) return "Đăng ngay khi chạy";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString("vi-VN", { hour12: false, day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+/* ================= P4-A.6 appearance, locale, status labels ================= */
+/* The locale dictionary is the single source of truth for every user facing
+   string. The theme is a pure CSS concern, so the palette lives in tokens and
+   the script only flips the data-theme attribute on the root element. */
+
+const LOCALE_KEY = "tooldh.locale";
+const THEME_KEY = "tooldh.theme";
+
+const I18N = {
+  vi: {
+    "nav.workspace": "Không gian làm việc",
+    "nav.overview": "Tổng quan",
+    "nav.projects": "Dự án",
+    "nav.videos": "Video Lab",
+    "nav.library": "Thư viện",
+    "nav.publishing": "Xuất bản",
+    "nav.advanced": "Nâng cao",
+    "nav.settings": "Cài đặt",
+    "nav.trends": "Trend Analyzer",
+    "nav.filter": "Video Filter",
+    "nav.caption": "Caption & Hashtag",
+    "nav.editor": "Video Editor",
+    "nav.approval": "Approval Center",
+    "nav.studio": "TikTok Studio",
+    "nav.analytics": "Analytics",
+    "nav.history": "History & Logs",
+
+    "auto.running": "Đang hoạt động",
+    "auto.stopped": "Đang tạm dừng",
+    "auto.emergency": "Dừng khẩn cấp",
+    "auto.resume": "Tiếp tục hoạt động",
+    "auto.pause": "Tạm dừng tự động hóa",
+    "auto.stopSchedule": "Dừng lịch chạy",
+    "auto.startSchedule": "Bật lịch chạy",
+    "auto.refresh": "Làm mới dữ liệu",
+    "auto.state": "Trạng thái tự động hóa",
+    "auto.emergencyOn": "Dừng khẩn cấp đang bật. Mọi tác vụ tự động đều bị chặn.",
+    "auto.emergencyOff": "Không có dừng khẩn cấp. Tự động hóa có thể chạy.",
+    "auto.scheduleOn": "Lịch chạy tự động đang chạy.",
+    "auto.scheduleConfigured": "Lịch chạy đã cấu hình nhưng chưa chạy.",
+    "auto.scheduleOff": "Lịch chạy tự động đang tắt.",
+    "auto.next": "Lượt kế tiếp",
+    "auto.noNext": "Chưa có lượt kế tiếp.",
+    "auto.confirmStop": "Dừng toàn bộ tự động hóa? Mọi tác vụ đang chạy sẽ bị chặn.",
+    "auto.confirmPause": "Tạm dừng tự động hóa? Bạn có thể tiếp tục bất cứ lúc nào.",
+    "auto.doneStop": "Đã dừng toàn bộ tự động hóa.",
+    "auto.doneResume": "Đã cho phép tự động hóa chạy lại.",
+    "auto.donePause": "Đã tạm dừng tự động hóa.",
+    "auto.doneSchedule": "Đã cập nhật lịch chạy.",
+    "auto.failed": "Không thể cập nhật trạng thái. Đã khôi phục hiển thị cũ.",
+    "auto.autoPublishOff": "Auto Publish đang tắt",
+    "auto.autoDownloadOff": "Auto Download đang tắt",
+
+    "notif.title": "Thông báo",
+    "notif.empty": "Không có thông báo mới.",
+    "notif.viewAll": "Xem tất cả",
+    "notif.critical": "Cần xử lý",
+    "notif.info": "Thông tin",
+
+    "overview.auto": "Tự động hóa",
+    "overview.blockers": "Vấn đề cần xử lý",
+    "overview.activity": "Hoạt động gần đây",
+    "overview.viewAll": "Xem tất cả",
+    "overview.nextAction": "Hành động kế tiếp",
+    "overview.scheduledAt": "Thời gian",
+    "overview.configure": "Cấu hình",
+    "overview.noActivity": "Chưa có hoạt động.",
+    "overview.noBlockers": "Không có vấn đề nào cần xử lý.",
+
+    "settings.appearance": "Giao diện & ngôn ngữ",
+    "settings.theme": "Giao diện",
+    "settings.themeHelp": "Áp dụng ngay, không cần tải lại trang.",
+    "settings.language": "Ngôn ngữ",
+    "settings.languageHelp": "Đổi ngôn ngữ hiển thị ngay trên toàn bộ giao diện.",
+    "theme.light": "Sáng",
+    "theme.dark": "Tối",
+    "theme.system": "Theo hệ thống",
+
+    "tab.overview": "Tổng quan",
+    "tab.results": "Kết quả",
+    "tab.versions": "Phiên bản",
+    "tab.publish": "Xuất bản",
+    "tab.history": "Lịch sử",
+
+    "p1.search.start": "Bắt đầu tìm kiếm",
+    "p1.search.filters": "Thiết lập bộ lọc",
+    "p1.search.topic": "Chủ đề dùng để tìm",
+    "p1.search.idle": "Chưa tìm kiếm",
+    "p1.search.running": "Đang tìm kiếm…",
+    "p1.search.done": "Đã tìm kiếm",
+    "p1.search.error": "Lỗi tìm kiếm",
+    "p1.empty.title": "Chưa có kết quả nghiên cứu",
+    "p1.empty.note": "Dự án chưa có phiên bản. Bấm “Bắt đầu tìm kiếm” để tạo phiên bản đầu tiên.",
+    "p1.empty.noteRuns": "Phiên bản này chưa có video nào.",
+    "p1.empty.topic": "Chủ đề: ",
+    "p1.noResults": "Chưa có kết quả nghiên cứu.",
+    "p1.preview.empty": "Chưa có video để xem trước.",
+
+    "status.DRAFT": "Bản nháp",
+    "status.CAPTION_READY": "Sẵn sàng duyệt",
+    "status.APPROVED": "Đã duyệt",
+    "status.SCHEDULED": "Đã lên lịch",
+    "status.UPLOADING": "Đang đăng",
+    "status.PUBLISHED": "Đã đăng",
+    "status.PUBLISH_UNKNOWN": "Chưa xác nhận đăng",
+    "status.RIGHTS_REQUIRED": "Cần xác minh quyền",
+    "status.FAILED": "Có lỗi",
+    "status.IDLE": "Đang chờ",
+    "status.RUNNING": "Đang chạy",
+    "status.PAUSED": "Đã tạm dừng",
+    "status.COMPLETED": "Hoàn tất",
+    "status.QUEUED": "Đang chờ chạy",
+    "status.ALLOWLISTED_PERMITTED": "Đã cấp quyền",
+    "status.NO_QUALIFIED_VIDEO": "Không có video đạt yêu cầu",
+    "status.CANDIDATE_FOUND": "Đã tìm thấy video",
+
+    "common.cancel": "Hủy",
+    "common.close": "Đóng",
+    "common.saving": "Đang lưu…",
+    "common.loading": "Đang tải…",
+    "common.empty": "Chưa có dữ liệu.",
+  },
+  en: {
+    "nav.workspace": "Workspace",
+    "nav.overview": "Overview",
+    "nav.projects": "Projects",
+    "nav.videos": "Video Lab",
+    "nav.library": "Library",
+    "nav.publishing": "Publishing",
+    "nav.advanced": "Advanced",
+    "nav.settings": "Settings",
+    "nav.trends": "Trend Analyzer",
+    "nav.filter": "Video Filter",
+    "nav.caption": "Caption & Hashtag",
+    "nav.editor": "Video Editor",
+    "nav.approval": "Approval Center",
+    "nav.studio": "TikTok Studio",
+    "nav.analytics": "Analytics",
+    "nav.history": "History & Logs",
+
+    "auto.running": "Running",
+    "auto.stopped": "Paused",
+    "auto.emergency": "Emergency stop",
+    "auto.resume": "Resume automation",
+    "auto.pause": "Pause automation",
+    "auto.stopSchedule": "Stop schedule",
+    "auto.startSchedule": "Start schedule",
+    "auto.refresh": "Refresh data",
+    "auto.state": "Automation state",
+    "auto.emergencyOn": "Emergency stop is on. Every automated task is blocked.",
+    "auto.emergencyOff": "No emergency stop. Automation can run.",
+    "auto.scheduleOn": "The automatic schedule is running.",
+    "auto.scheduleConfigured": "The schedule is configured but not running.",
+    "auto.scheduleOff": "The automatic schedule is off.",
+    "auto.next": "Next run",
+    "auto.noNext": "No next run scheduled.",
+    "auto.confirmStop": "Stop all automation? Every running task will be blocked.",
+    "auto.confirmPause": "Pause automation? You can resume it at any time.",
+    "auto.doneStop": "All automation has been stopped.",
+    "auto.doneResume": "Automation is allowed to run again.",
+    "auto.donePause": "Automation has been paused.",
+    "auto.doneSchedule": "The schedule has been updated.",
+    "auto.failed": "The state could not be updated. The display was restored.",
+    "auto.autoPublishOff": "Auto Publish is off",
+    "auto.autoDownloadOff": "Auto Download is off",
+
+    "notif.title": "Notifications",
+    "notif.empty": "No new notifications.",
+    "notif.viewAll": "View all",
+    "notif.critical": "Needs attention",
+    "notif.info": "Information",
+
+    "overview.auto": "Automation",
+    "overview.blockers": "Issues to handle",
+    "overview.activity": "Recent activity",
+    "overview.viewAll": "View all",
+    "overview.nextAction": "Next action",
+    "overview.scheduledAt": "Scheduled",
+    "overview.configure": "Configure",
+    "overview.noActivity": "No activity yet.",
+    "overview.noBlockers": "No issues need handling.",
+
+    "settings.appearance": "Appearance & language",
+    "settings.theme": "Appearance",
+    "settings.themeHelp": "Applies instantly, no reload needed.",
+    "settings.language": "Language",
+    "settings.languageHelp": "Switches the whole interface instantly.",
+    "theme.light": "Light",
+    "theme.dark": "Dark",
+    "theme.system": "Follow system",
+
+    "tab.overview": "Overview",
+    "tab.results": "Results",
+    "tab.versions": "Versions",
+    "tab.publish": "Publishing",
+    "tab.history": "History",
+
+    "p1.search.start": "Start search",
+    "p1.search.filters": "Filter settings",
+    "p1.search.topic": "Topic used for the search",
+    "p1.search.idle": "Not searched yet",
+    "p1.search.running": "Searching…",
+    "p1.search.done": "Search complete",
+    "p1.search.error": "Search failed",
+    "p1.empty.title": "No research results yet",
+    "p1.empty.note": "This project has no version yet. Click “Start search” to create the first version.",
+    "p1.empty.noteRuns": "This version has no video yet.",
+    "p1.empty.topic": "Topic: ",
+    "p1.noResults": "No research results yet.",
+    "p1.preview.empty": "No video to preview yet.",
+
+    "status.DRAFT": "Draft",
+    "status.CAPTION_READY": "Ready for review",
+    "status.APPROVED": "Approved",
+    "status.SCHEDULED": "Scheduled",
+    "status.UPLOADING": "Uploading",
+    "status.PUBLISHED": "Published",
+    "status.PUBLISH_UNKNOWN": "Publication unconfirmed",
+    "status.RIGHTS_REQUIRED": "Rights need review",
+    "status.FAILED": "Failed",
+    "status.IDLE": "Waiting",
+    "status.RUNNING": "Running",
+    "status.PAUSED": "Paused",
+    "status.COMPLETED": "Completed",
+    "status.QUEUED": "Queued",
+    "status.ALLOWLISTED_PERMITTED": "Rights granted",
+    "status.NO_QUALIFIED_VIDEO": "No video met the filters",
+    "status.CANDIDATE_FOUND": "Video found",
+
+    "common.cancel": "Cancel",
+    "common.close": "Close",
+    "common.saving": "Saving…",
+    "common.loading": "Loading…",
+    "common.empty": "No data yet.",
+  },
+};
+
+const UI = {
+  locale: "vi",
+  theme: "light",
+};
+
+function t(key) {
+  const dict = I18N[UI.locale] || I18N.vi;
+  return dict[key] || (I18N.vi[key] || key);
+}
+
+/* The raw backend enums never reach the interface. They are mapped here so a
+   new enum falls back to the original value instead of an empty label. */
+function statusLabel(value) {
+  const raw = String(value == null ? "" : value).toUpperCase();
+  if (!raw) return "—";
+  return t("status." + raw);
+}
+
+function readStored(key, allowed, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    if (value && allowed.indexOf(value) !== -1) return value;
+  } catch (_) { /* private mode */ }
+  return fallback;
+}
+
+function storeValue(key, value) {
+  try { localStorage.setItem(key, value); } catch (_) { /* private mode */ }
+}
+
+/* ----------------------- theme ----------------------- */
+
+function systemPrefersDark() {
+  try {
+    return !!(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  } catch (_) { return false; }
+}
+
+function resolvedTheme() {
+  if (UI.theme === "system") return systemPrefersDark() ? "dark" : "light";
+  return UI.theme === "dark" ? "dark" : "light";
+}
+
+function applyTheme() {
+  const theme = resolvedTheme();
+  document.documentElement.setAttribute("data-theme", theme);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", theme === "dark" ? "#1C1D1F" : "#EDEEEB");
+}
+
+function setTheme(theme) {
+  UI.theme = ["light", "dark", "system"].indexOf(theme) !== -1 ? theme : "light";
+  storeValue(THEME_KEY, UI.theme);
+  applyTheme();
+  const sel = el("set-theme");
+  if (sel) sel.value = UI.theme;
+}
+
+/* ----------------------- locale ----------------------- */
+
+const SUBTITLES = {
+  vi: {
+    "overview.sub": "Trạng thái thật của hệ thống.",
+    "assistant.sub": "Trợ lý đọc trạng thái thật, không tự hành động.",
+    "discovery.sub": "Tạo, tìm kiếm và mở dự án. Mỗi dự án giữ riêng phiên bản, video và lịch sử.",
+    "trends.sub": "Điểm xu hướng và lý do mỗi video được chọn hoặc loại.",
+    "filter.sub": "Mỗi lượt chỉ chọn một video tốt nhất.",
+    "caption.sub": "Soạn và sửa caption trước khi duyệt.",
+    "videos.sub": "Đo thật bằng FFprobe/FFmpeg, tải duy nhất 1 video đủ quyền.",
+    "videoslib.sub": "Media đã tải, đã hash và đã xử lý.",
+    "editor.sub": "Kiểm tra và cắt video bằng backend.",
+    "approval.sub": "Duyệt tải video và duyệt đăng video là hai quyền riêng.",
+    "scheduler.sub": "Caption → Duyệt → Lịch → Đăng. Chỉ ghi nhận đã đăng khi có URL xác minh.",
+    "studio.sub": "Bản nháp. Không tự đăng công khai.",
+    "analytics.sub": "Thống kê hiệu quả từ dữ liệu thật.",
+    "history.sub": "Lịch sử đăng bài và nhật ký hoạt động.",
+    "settings.sub": "Cấu hình, giao diện và quyền truy cập.",
+  },
+  en: {
+    "overview.sub": "The real state of the system.",
+    "assistant.sub": "A read only helper. It never acts on its own.",
+    "discovery.sub": "Create, search and open projects. Every project keeps its own versions, videos and history.",
+    "trends.sub": "Trend scores and the reason every video was selected or dropped.",
+    "filter.sub": "Every run selects only the single best video.",
+    "caption.sub": "Write and edit the caption before approval.",
+    "videos.sub": "Measured with FFprobe/FFmpeg. Only one fully cleared video is downloaded.",
+    "videoslib.sub": "Downloaded media, hashed and processed.",
+    "editor.sub": "Inspect and cut video on the backend.",
+    "approval.sub": "Approving a download and approving a publication are two separate rights.",
+    "scheduler.sub": "Caption → Approve → Schedule → Publish. A post is only counted as published with a verified URL.",
+    "studio.sub": "A draft. Nothing is published publicly.",
+    "analytics.sub": "Performance from real data.",
+    "history.sub": "Publication history and the activity log.",
+    "settings.sub": "Configuration, appearance and access rights.",
+  },
+};
+
+const TITLE_KEYS = {
+  overview: ["nav.overview", "overview.sub", "nav.overview"],
+  assistant: ["nav.assistant", "assistant.sub", "nav.assistant"],
+  discovery: ["nav.projects", "discovery.sub", "nav.projects"],
+  trends: ["nav.trends", "trends.sub", "nav.trends"],
+  filter: ["nav.filter", "filter.sub", "nav.filter"],
+  caption: ["nav.caption", "caption.sub", "nav.caption"],
+  videos: ["nav.videos", "videos.sub", "nav.videos"],
+  videoslib: ["nav.library", "videoslib.sub", "nav.library"],
+  editor: ["nav.editor", "editor.sub", "nav.editor"],
+  approval: ["nav.approval", "approval.sub", "nav.approval"],
+  scheduler: ["nav.publishing", "scheduler.sub", "nav.publishing"],
+  studio: ["nav.studio", "studio.sub", "nav.studio"],
+  analytics: ["nav.analytics", "analytics.sub", "nav.analytics"],
+  history: ["nav.history", "history.sub", "nav.history"],
+  settings: ["nav.settings", "settings.sub", "nav.settings"],
+};
+
+function titleLocalized(name) {
+  const entry = TITLE_KEYS[name];
+  if (!entry) return TITLES[name] || ["TOOLTDH", "", ""];
+  const subs = SUBTITLES[UI.locale] || SUBTITLES.vi;
+  return [t(entry[0]), subs[entry[1]] || "", t(entry[2])];
+}
+
+/* The navigation labels are translated in place so the markup, the order and
+   the advanced group stay exactly as they are. */
+const NAV_LOCALE_KEYS = {
+  overview: "nav.overview",
+  discovery: "nav.projects",
+  videos: "nav.videos",
+  videoslib: "nav.library",
+  scheduler: "nav.publishing",
+  trends: "nav.trends",
+  filter: "nav.filter",
+  caption: "nav.caption",
+  editor: "nav.editor",
+  approval: "nav.approval",
+  studio: "nav.studio",
+  analytics: "nav.analytics",
+  history: "nav.history",
+  settings: "nav.settings",
+};
+
+function renderNavigation() {
+  document.querySelectorAll(".nav-item[data-view]").forEach((btn) => {
+    const key = NAV_LOCALE_KEYS[btn.dataset.view];
+    if (!key) return;
+    const label = btn.querySelector(".nav-item-label");
+    if (label) label.textContent = t(key);
+  });
+  const group = document.querySelector("#nav .nav-group:not(.nav-toggle)");
+  if (group) group.textContent = t("nav.workspace");
+  const toggle = el("nav-advanced-toggle");
+  if (toggle && toggle.childNodes[0] && toggle.childNodes[0].nodeType === 3) {
+    toggle.childNodes[0].nodeValue = t("nav.advanced") + " ";
+  }
+}
+
+function renderViewChrome() {
+  const localized = titleLocalized(state.view);
+  el("view-title").textContent = localized[0];
+  el("view-sub").textContent = localized[1] || "";
+  if (el("crumbs")) {
+    el("crumbs").innerHTML = "<span>TOOLTDH Pro</span><span class='crumb-sep'>/</span><span>" +
+      esc(localized[2] || localized[0]) + "</span>";
+  }
+  document.querySelectorAll("[data-i18n-tab]").forEach((tab) => {
+    const value = t(tab.getAttribute("data-i18n-tab"));
+    if (value) tab.textContent = value;
+  });
+}
+
+function applyLocale() {
+  UI.locale = readStored(LOCALE_KEY, ["vi", "en"], "vi");
+  document.documentElement.setAttribute("lang", UI.locale);
+  document.querySelectorAll("[data-i18n]").forEach((node) => {
+    const value = t(node.getAttribute("data-i18n"));
+    if (value) node.textContent = value;
+  });
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((node) => {
+    const value = t(node.getAttribute("data-i18n-placeholder"));
+    if (value) node.setAttribute("placeholder", value);
+  });
+  document.querySelectorAll("[data-i18n-title]").forEach((node) => {
+    const value = t(node.getAttribute("data-i18n-title"));
+    if (value) node.setAttribute("title", value);
+  });
+  renderNavigation();
+  renderViewChrome();
+  renderAutomationControl();
+  renderSettingsAppearance();
+  if (typeof renderOverviewAutomation === "function") renderOverviewAutomation();
+  // The project workspace has its own texts, so they follow the locale too.
+  if (typeof renderTop5 === "function") renderTop5();
+  if (typeof renderProjectEmptyState === "function") renderProjectEmptyState();
+}
+
+function setLocale(locale) {
+  UI.locale = locale === "en" ? "en" : "vi";
+  storeValue(LOCALE_KEY, UI.locale);
+  applyLocale();
+}
+
+function renderSettingsAppearance() {
+  const themeSel = el("set-theme");
+  if (themeSel) themeSel.value = UI.theme;
+  const localeSel = el("set-locale");
+  if (localeSel) localeSel.value = UI.locale;
+}
+
 /* ---------------------------------------------------------- routing */
 
 const TITLES = {
   overview: ["Tổng quan", "Trạng thái thật của hệ thống.", "Tổng quan"],
   assistant: ["AI Assistant", "Trợ lý đọc trạng thái thật, không tự hành động.", "Nâng cao / AI Assistant"],
-  discovery: ["Dự án", "Project, version và TOP video theo dữ liệu thật.", "Dự án"],
+  discovery: ["Dự án", "Tạo, tìm kiếm và mở dự án. Mỗi dự án giữ riêng phiên bản, video và lịch sử.", "Dự án"],
   trends: ["Trend Analyzer", "Điểm xu hướng và lý do mỗi video được chọn hoặc loại.", "Nâng cao / Trend Analyzer"],
   filter: ["Video Filter", "Mỗi lượt chỉ chọn một video tốt nhất.", "Nâng cao / Video Filter"],
   caption: ["Caption & Hashtag Studio", "Soạn và sửa caption trước khi duyệt.", "Nâng cao / Caption & Hashtag"],
@@ -164,7 +655,7 @@ const TITLES = {
   videoslib: ["Thư viện", "Media đã tải, đã hash và đã xử lý.", "Thư viện"],
   editor: ["Video Editor", "Kiểm tra và cắt video bằng backend.", "Nâng cao / Video Editor"],
   approval: ["Approval Center", "Duyệt tải video và duyệt đăng video là hai quyền riêng.", "Nâng cao / Approval Center"],
-  scheduler: ["Xuất bản", "Caption → Duyệt → Lịch → Đăng. Chỉ PUBLISHED khi có URL xác minh.", "Xuất bản"],
+  scheduler: ["Xuất bản nội dung", "Caption → Duyệt → Lịch → Đăng. Chỉ ghi nhận đã đăng khi có URL xác minh.", "Xuất bản"],
   studio: ["TikTok Studio", "Bản nháp. Không tự đăng công khai.", "Nâng cao / TikTok Studio"],
   analytics: ["Analytics", "Thống kê hiệu quả từ dữ liệu thật.", "Nâng cao / Analytics"],
   history: ["History & Logs", "Lịch sử đăng bài và nhật ký hoạt động.", "Nâng cao / History & Logs"],
@@ -179,17 +670,22 @@ function showView(name) {
   document.querySelectorAll(".nav-item").forEach((b) => {
     b.classList.toggle("active", b.dataset.view === name);
   });
-  const title = TITLES[name] || ["TOOLTDH", "", ""];
+  const title = titleLocalized(name);
   el("view-title").textContent = title[0];
   el("view-sub").textContent = title[1] || "";
   if (el("crumbs")) el("crumbs").innerHTML = "<span>TOOLTDH Pro</span><span class='crumb-sep'>/</span><span>" + esc(title[2] || title[0]) + "</span>";
   location.hash = name;
+  // A new page starts at the top so the workspace never opens halfway
+  // through the previous page.
+  window.scrollTo(0, 0);
+  const content = el("content");
+  if (content) content.scrollTop = 0;
   loadView(name);
 }
 
 function loadView(name) {
   if (name === "overview") return loadOverview();
-  if (name === "discovery") return loadDiscovery();
+  if (name === "discovery") return loadProjectSummary();
   if (name === "trends") return loadTrendView();
   if (name === "filter") return loadFilterView();
   if (name === "approval") return loadApprovals();
@@ -219,24 +715,31 @@ async function loadOverview() {
   try { data = await api("/overview"); } catch (e) { toast(e.message, "err"); return; }
   state.overview = data;
 
-  el("mode-chip").textContent = "mode: " + (data.mode || "—");
-  el("account-chip").textContent = "account: " + (data.expected_account || "—");
+  el("mode-chip").textContent = data.mode === "approve" ? "Chế độ duyệt thủ công" : "Chế độ tự động";
+  el("account-chip").textContent = "Tài khoản: " + (data.expected_account || "—");
 
-  const stopPill = el("stop-pill");
-  stopPill.hidden = false;
-  stopPill.querySelector(".dot").nextSibling.textContent = "";
-  stopPill.childNodes[1].nodeValue = data.emergency_stop
-    ? "Emergency stop active"
-    : "Automation running";
+  // The header control always mirrors the confirmed backend state.
+  automationState.overview = data;
+  renderAutomationControl();
+
+  // The project counts come from the project-scoped summary so the overview
+  // never mixes numbers from different scopes.
+  let projects = [];
+  try {
+    const sum = await api("/p1/projects/summary");
+    projects = sum.projects || [];
+  } catch (_) { /* offline ok */ }
+  const activeProjects = projects.filter((p) => Number(p.versions || 0) > 0 || Number(p.publications || 0) > 0).length;
+  const pendingApproval = projects.reduce((sum, p) => sum + Number(p.pending_approval || 0), 0);
+  const verifiedPublished = projects.reduce((sum, p) => sum + Number(p.published_verified || 0), 0);
 
   const c = data.counts || {};
   const cards = [
-    ["Candidates", c.candidates, "video tìm thấy", "accent"],
-    ["Chờ duyệt", c.awaiting_selection, "review mở", "warn"],
-    ["Tasks", c.tasks, "tác vụ đã lưu", ""],
-    ["Đã đăng", c.published, "bài trong history", "ok"],
-    ["Thư viện", c.library, "video đã hash", ""],
-    ["Blockers", (data.blockers || []).length, "cần xử lý", (data.blockers || []).length ? "danger" : ""],
+    ["Dự án đang hoạt động", activeProjects, "có phiên bản hoặc bài đăng", "accent"],
+    ["Chờ duyệt", pendingApproval, "bài cần bạn duyệt", pendingApproval ? "warn" : ""],
+    ["Đã đăng (xác minh)", verifiedPublished, "có URL xác nhận", verifiedPublished ? "ok" : ""],
+    ["Thư viện", c.library, "media đã tải", ""],
+    ["Vấn đề", (data.blockers || []).length, "cần xử lý", (data.blockers || []).length ? "danger" : ""],
   ];
   el("ov-stats").innerHTML = cards.map(([label, value, sub, kind]) =>
     '<div class="stat ' + (kind || "") + '">' +
@@ -245,35 +748,123 @@ async function loadOverview() {
     '<div class="stat-sub">' + esc(sub) + "</div></div>"
   ).join("");
 
-  el("ov-blocker-count").textContent = String((data.blockers || []).length);
-  el("ov-blockers").innerHTML = (data.blockers || []).length
-    ? (data.blockers || []).map((b) =>
-        '<div class="notif"><div class="notif-kind">Blocker</div><div class="notif-msg">' +
-        esc(b) + "</div></div>").join("")
-    : '<div class="empty">Không có blocker.</div>';
+  // Repeated blocker reasons are grouped so the overview stays short. A
+  // filter rejection carries its own URL, so the reason is normalized before
+  // the count is taken.
+  const grouped = new Map();
+  (data.blockers || []).forEach((b) => {
+    const raw = String(b || "").trim();
+    if (!raw) return;
+    const key = normalizeBlocker(raw);
+    const entry = grouped.get(key);
+    if (entry) entry.count += 1;
+    else grouped.set(key, { count: 1, sample: raw });
+  });
+  const blockerRows = Array.from(grouped.entries());
+  el("ov-blocker-count").textContent = String(blockerRows.length);
+  el("ov-blockers").innerHTML = blockerRows.length
+    ? blockerRows.slice(0, 3).map(([reason, info]) =>
+        '<div class="issue-group"><span class="issue-count">' + num(info.count) + '</span>' +
+        '<span>' + esc(reason) + "</span></div>").join("") +
+      (blockerRows.length > 3
+        ? '<button class="link-btn" id="btn-ov-blocker-more">' + esc(t("overview.viewAll")) +
+          " (" + num(blockerRows.length - 3) + ")</button>"
+        : "")
+    : '<div class="empty">' + esc(t("overview.noBlockers")) + "</div>";
+  const moreBlockers = el("btn-ov-blocker-more");
+  if (moreBlockers) moreBlockers.addEventListener("click", () => showView("history"));
 
   const s = data.schedule || {};
-  el("ov-sched-state").textContent = s.enabled ? "đang bật" : "đang tắt";
+  el("ov-sched-state").textContent = s.enabled ? t("auto.running") : t("auto.stopped");
   el("ov-sched-state").className = "tag " + (s.enabled ? "tag-ok" : "");
-  el("ov-schedule").innerHTML =
-    "<dl class='kv'>" +
-    "<dt>Giờ chạy</dt><dd>" + esc(s.daily_time || "—") + "</dd>" +
-    "<dt>Chủ đề</dt><dd>" + esc(s.topic || "—") + "</dd>" +
-    "<dt>Lần chạy tiếp</dt><dd>" + esc(s.next_run || "—") + "</dd>" +
-    "<dt>Số lượt đã chạy</dt><dd>" + num(s.run_count) + "</dd>" +
-    "<dt>Lần gần nhất</dt><dd>" + esc((s.last_run && s.last_run.status) || "—") + "</dd>" +
-    "</dl>";
 
-  const tasks = data.recent_tasks || [];
-  el("ov-tasks").innerHTML =
-    "<thead><tr><th>Task</th><th>Trạng thái</th><th>Nguồn</th><th>Cập nhật</th></tr></thead><tbody>" +
-    (tasks.length ? tasks.map((t) =>
-      "<tr><td>" + esc(t.task_id) + "</td>" +
-      "<td>" + tag(t.status || "—", statusKind(t.status)) + "</td>" +
-      "<td class='muted'>" + esc(t.source_url || "—") + "</td>" +
-      "<td class='muted'>" + esc(fmtDate(t.updated_at)) + "</td></tr>").join("")
-      : emptyRow(4, "Chưa có tác vụ nào.")) +
-    "</tbody>";
+  // At most five recent meaningful events, never a raw log dump.
+  const events = [];
+  (data.recent_tasks || []).forEach((t) => events.push({
+    at: String(t.updated_at || ""),
+    kind: String(t.status || ""),
+    text: "Tác vụ " + (t.task_id || ""),
+  }));
+  (data.recent_reviews || []).forEach((r) => events.push({
+    at: String(r.created_at || ""),
+    kind: String(r.status || ""),
+    text: "Review " + (r.topic || r.task_id || "") + " · " + num(r.candidate_count) + " ứng viên",
+  }));
+  events.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+  const activity = el("ov-activity");
+  if (activity) {
+    activity.innerHTML = events.length
+      ? events.slice(0, 5).map((e) =>
+          '<div class="notif"><div class="notif-kind">' + esc(friendlySchedule(e.at)) + "</div>" +
+          '<div class="notif-msg">' + esc(e.text) + " · " + tag(friendlyTaskStatus(e.kind), statusKind(e.kind)) + "</div></div>").join("")
+      : '<div class="empty">' + esc(t("overview.noActivity")) + "</div>";
+  }
+
+  renderOverviewAutomation();
+}
+
+/* The automation card is a compact strip: the current state, the next
+   scheduled action, the time and a link to the configuration. */
+function renderOverviewAutomation() {
+  const box = el("ov-schedule");
+  if (!box) return;
+  const data = automationState.overview || state.overview || {};
+  const s = data.schedule || {};
+  const facts = automationFacts();
+  const scheduler = facts.scheduler || {};
+  // The next run time comes from the live scheduler when it runs, and from the
+  // stored schedule otherwise.
+  const nextAt = scheduler.next_run || s.next_run || "";
+  const nextText = nextAt ? friendlySchedule(nextAt) : t("auto.noNext");
+  const topic = String(s.topic || scheduler.topic || "").trim();
+  const label = facts.emergency ? t("auto.emergency") : (facts.scheduleEnabled ? t("auto.running") : t("auto.stopped"));
+  const detail = facts.emergency ? t("auto.emergencyOn") : (topic ? topic : t("auto.scheduleOff"));
+  box.innerHTML =
+    '<div class="auto-strip">' +
+    '<div class="auto-strip-main">' +
+    '<span class="status-dot ' + (facts.emergency ? "is-emergency" : (facts.scheduleEnabled ? "is-running" : "is-stopped")) + '"></span>' +
+    '<span class="auto-strip-label">' + esc(label) + "</span>" +
+    '<span class="auto-strip-detail">' + esc(detail) + "</span>" +
+    "</div>" +
+    '<span class="auto-strip-detail">' + esc(t("overview.nextAction")) + ": " +
+    esc(s.enabled ? t("auto.running") : t("auto.stopped")) + "</span>" +
+    '<span class="auto-strip-detail">' + esc(t("overview.scheduledAt")) + ": " + esc(nextText) + "</span>" +
+    '<button class="link-btn auto-strip-link" id="btn-ov-configure">' + esc(t("overview.configure")) + "</button>" +
+    "</div>";
+  const configure = el("btn-ov-configure");
+  if (configure) configure.addEventListener("click", () => showView("scheduler"));
+}
+
+function friendlyTaskStatus(status) {
+  const s = String(status || "").toUpperCase();
+  if (!s) return "—";
+  // The status labels live in the locale dictionary, so the overview and the
+  // tables always show the same wording.
+  const known = ["COMPLETED", "RUNNING", "FAILED", "BLOCKED", "AWAITING_SELECTION", "SELECTED",
+    "DRAFT_SAVED", "AWAITING_APPROVAL", "PUBLISHED", "REJECTED", "HOLD", "QUEUED", "PAUSED"];
+  if (known.indexOf(s) !== -1) return statusLabel(s);
+  return String(status);
+}
+
+/* A filter rejection repeats the same reason for every video, but each line
+   also carries its own URL and its own measured value. The URL and the number
+   are removed so the reasons can be counted as one group instead of many
+   near identical rows. */
+function normalizeBlocker(raw) {
+  let text = String(raw || "").trim();
+  // "Loại theo bộ lọc — <url>: <reason>" becomes "<head> — <reason>".
+  const match = text.match(/^(.*?)\s+—\s+\S*https?:\/\/\S*?\s*:\s*(.+)$/);
+  if (match) {
+    const reason = match[2].trim();
+    const head = match[1].trim();
+    text = head ? head + " — " + reason : reason;
+  }
+  // Any remaining URL is removed.
+  text = text.replace(/https?:\/\/\S+/g, "");
+  // The measured value differs for every video, so it is replaced by a
+  // marker to let the same reason share one group.
+  text = text.replace(/\b\d[\d.,]*\b/g, "#");
+  return text.replace(/\s{2,}/g, " ").trim();
 }
 
 function statusKind(status) {
@@ -298,8 +889,12 @@ const RUN_STATUS = {
 function setRunStatus(status) {
   const info = RUN_STATUS[status] || { label: String(status || "IDLE"), kind: "" };
   const badge = el("disc-status");
-  badge.textContent = info.label;
-  badge.className = "tag " + (info.kind || "");
+  // The badge belongs to the legacy discovery workspace. It is optional, so
+  // a missing badge must never break the caller.
+  if (badge) {
+    badge.textContent = info.label;
+    badge.className = "tag " + (info.kind || "");
+  }
   state.status = status;
 }
 
@@ -327,6 +922,13 @@ function readFilters() {
 }
 
 async function loadDiscovery() {
+  // When a project is open, its own saved result is shown. The global
+  // discovery result of another project is never used here.
+  if (p1state.projectId) {
+    await loadProjectRunResult();
+    loadQueue();
+    return;
+  }
   setRunStatus(state.status || "IDLE");
   try {
     const data = await api("/discovery/last");
@@ -357,8 +959,11 @@ async function loadDiscovery() {
 }
 
 function renderDiscovery() {
-  const rows = state.candidates || [];
-  el("disc-count").textContent = rows.length + " ứng viên";
+  // The candidate table belongs to the open project. It is painted from the
+  // project scoped run, so a result of another project can never appear here.
+  const inScope = p1RunBelongsToCurrentScope();
+  const rows = inScope ? (p1runstate.videos || []) : [];
+  el("disc-count").textContent = rows.length ? rows.length + " ứng viên" : "0 ứng viên";
 
   const blockers = (state.result && state.result.blockers) || [];
   el("disc-blockers").innerHTML = blockers.length
@@ -383,15 +988,15 @@ function renderDiscovery() {
         "<td class='num'>" + metric(c.likes, known) + "</td>" +
         "<td class='num'>" + metric(c.comments, known) + "</td>" +
         "<td class='num'>" + metric(c.shares, known) + "</td>" +
-        "<td class='num'>" + (c.duration_seconds ? c.duration_seconds.toFixed(1) + "s" : "—") + "</td>" +
+        "<td class='num'>" + (c.duration_seconds ? Number(c.duration_seconds).toFixed(1) + "s" : "—") + "</td>" +
         "<td class='muted'>" + esc(c.posted_at || "—") + "</td>" +
-        "<td class='num'>" + (score ? score.score : "—") + "</td>" +
-        "<td>" + (score ? tag(score.decision, statusKind(score.decision)) : "—") + "</td>" +
+        "<td class='num'>" + (score ? score.score : num(c.score)) + "</td>" +
+        "<td>" + (score ? tag(score.decision, statusKind(score.decision)) : tag(c.status, statusKind(c.status))) + "</td>" +
         "<td><button class='btn btn-xs' data-detail='" + esc(c.source_url) + "'>Xem</button>" +
         (isSelected ? " <button class='btn btn-xs' data-approve='" + esc(c.source_url) + "'>Duyệt</button>" : "") +
         "</td>" +
         "</tr>";
-    }).join("") : emptyRow(11, "Chưa có kết quả. Bấm “Tìm kiếm” để chạy tìm kiếm thật.")) +
+    }).join("") : emptyRow(11, t("p1.noResults"))) +
     "</tbody>";
 
   renderSelected();
@@ -408,70 +1013,64 @@ function fmtAge(value) {
   return n === 1 ? "1 ngày" : n + " ngày";
 }
 
+/* The videos that still need a manual look. They come from the project
+   scoped run, so they always belong to the open project. */
 function renderNeedsReview() {
-  const items = state.needsReview || [];
-  if (!items.length) return "";
-  return '<div class="card" style="margin-top:8px"><strong>Cần xem lại (' + items.length + ")</strong>" +
+  const items = p1RunBelongsToCurrentScope() ? (p1runstate.videos || []) : [];
+  const pending = items.filter((v) => String(v.status || "") !== "VERIFIED");
+  if (!pending.length) return "";
+  return '<div class="card" style="margin-top:8px"><strong>Cần xem lại (' + pending.length + ")</strong>" +
     '<div class="muted">Đạt điều kiện metadata nhưng nội dung chưa đủ bằng chứng. Không tự động đăng.</div>' +
-    items.slice(0, 5).map((n) =>
+    pending.slice(0, 5).map((n) =>
       "<div class='muted' style='margin-top:6px'><a href='" + esc(n.source_url) + "' target='_blank' rel='noreferrer' style='color:var(--burgundy-ink)'>" +
       esc((n.title || n.source_url || "").slice(0, 80)) + "</a>" +
       "<div>@" + esc(n.creator || "") + " · " + num(n.views) + " views · đăng " + esc(n.posted_at || "—") +
-      " · điểm xu hướng " + num(n.trend_score ?? n.score ?? 0) + " · quyền: " + esc(n.rights || "—") + "</div>" +
+      " · điểm xu hướng " + num(n.trend ?? n.trend_score ?? n.score ?? 0) + " · quyền: " + esc(n.rights || "—") + "</div>" +
       "<div>" + esc(n.reason || "") + (n.user_confirmed ? " · ĐÃ XÁC MINH THỦ CÔNG" : "") + "</div>" +
       "<div class='row' style='margin-top:4px'><button class='btn btn-xs' data-confirm-content='" + esc(n.source_url) + "'>Xác nhận nội dung</button>" +
       " <button class='btn btn-xs btn-danger' data-dismiss-content='" + esc(n.source_url) + "'>Loại bỏ</button></div></div>"
     ).join("") + "</div>";
 }
 
+/* The results of a project are painted from the project scoped run state
+   only. The global discovery state belongs to another workspace and is never
+   used here, so a result of an older project can never leak into the open
+   project. */
 function renderTop5() {
   const box = el("disc-top5");
   if (!box) return;
-  const cards = state.top5 || [];
+  const inScope = p1RunBelongsToCurrentScope();
+  const cards = inScope ? (p1runstate.top5 || []) : [];
   const counter = el("disc-top5-count");
   if (counter) counter.textContent = cards.length ? cards.length + "/5 đề xuất" : "0 đề xuất";
+
+  // The search facts are shown as a compact strip. The long query log is
+  // deliberately kept out of the interface.
   const meta = [];
-  if (state.funnel) {
-    const fl = state.funnel;
-    meta.push("Funnel RAW " + (fl.raw || 0) + " → DEDUP " + (fl.dedup || 0) + " → FILTERED " + (fl.filtered || 0) + " → VERIFIED " + (fl.verified || 0) + "/NEEDS_REVIEW " + (fl.needs_review || 0));
+  const fl = inScope ? p1runstate.funnel : null;
+  if (fl) {
+    meta.push("RAW " + (fl.raw || 0) + " → DEDUP " + (fl.dedup || 0) +
+      " → LỌC " + (fl.filtered || 0) + " → ĐẠT " + (fl.verified || 0));
   }
-  if (state.verification) {
-    meta.push("VERIFIED " + (state.verification.verified || 0) + " · NEEDS_REVIEW " + (state.verification.needs_review || 0) + " · REJECTED " + (state.verification.rejected || 0));
-  }
-  if ((state.topicQueries || []).length) {
-    meta.push("Nhóm truy vấn: " + state.topicQueries.join(" · "));
-  }
-  if (state.appliedFilters) {
-    const f = state.appliedFilters;
-    const dur = (f.min_duration || f.max_duration)
-      ? ("thời lượng " + (f.min_duration || 0) + "–" + (f.max_duration || "∞") + "s")
+  const filters = inScope ? p1runstate.filters : null;
+  if (filters) {
+    const dur = (filters.min_duration || filters.max_duration)
+      ? ("thời lượng " + (filters.min_duration || 0) + "–" + (filters.max_duration || "∞") + "s")
       : "thời lượng không giới hạn";
-    meta.push("Lọc: views≥" + (f.min_views || 0) + " · " + dur + " · ≤" + (f.max_days || "∞") + " ngày"
-      + " · topic: " + (state.result && state.result.topic ? state.result.topic : ""));
+    meta.push("Lọc: views≥" + (filters.min_views || 0) + " · " + dur +
+      " · ≤" + (filters.max_days || "∞") + " ngày");
   }
-  if (state.queryTotal) {
-    const parts = Object.entries(state.queryStats || {}).map(([q, s]) =>
-      q + ": " + (s.returned || 0) + " trả về/" + (s.added || 0) + " giữ");
-    meta.push("TikTok trả " + state.queryTotal + " video (" + parts.join("; ") + ")");
-  }
-  if (state.langMarketNote) {
-    meta.push(state.langMarketNote);
-  }
-  const head = meta.length
-    ? '<div class="notif"><div class="notif-kind">Ghi chú</div><div class="notif-msg">' +
-      esc(meta.join(" | ")) + "</div></div>"
-    : "";
   const strip = el("disc-search-stats");
   if (strip) {
     strip.innerHTML = meta.length
       ? meta.map((m) => '<span class="info-chip">' + esc(m) + "</span>").join("")
-      : '<span class="info-chip">Chưa có kết quả tìm kiếm.</span>';
+      : '<span class="info-chip">' + esc(t("p1.noResults")) + "</span>";
   }
   if (!cards.length) {
-    box.innerHTML = head + '<div class="empty">Chưa có TOP 5. Bấm “Tìm kiếm” để hệ thống đề xuất tối đa 5 video tốt nhất (không cố lấp đủ 5).</div>';
+    box.innerHTML = '<div class="empty">' + esc(t("p1.noResults")) + "</div>";
     return;
   }
-  box.innerHTML = head + cards.map((c, i) => {
+  box.innerHTML = cards.map((c, i) => {
     const pick = !!c.pick;
     const status = String(c.status || (c.certainty === "HIGH" ? "VERIFIED" : "NEEDS_REVIEW"));
     const statusTag = status === "VERIFIED"
@@ -568,106 +1167,99 @@ async function dismissContent(sourceUrl) {
 }
 
 /* The AI content analysis of every candidate. Only the candidates whose
-   real content was read and judged as AI Music take part in the ranking. */
+   real content was read and judged as AI Music take part in the ranking.
+   The list comes from the project scoped run, so it never shows a video of
+   another project. */
 function renderAnalysis() {
-  const analyses = state.analyses || [];
-  const ranked = analyses.filter((a) => a.ranked !== false);
+  const analyses = p1RunBelongsToCurrentScope() ? (p1runstate.videos || []) : [];
+  const ranked = analyses.filter((a) => String(a.status || "") === "VERIFIED");
   const insufficient = analyses.filter(
-    (a) => a.ranked === false && a.content_relevant !== false
+    (a) => String(a.status || "") !== "VERIFIED" && String(a.rights || "") !== "REJECTED"
   );
   const counter = el("disc-analysis-count");
   if (counter) {
     counter.textContent = analyses.length
-      ? ranked.length + "/" + analyses.length + " video AI Music thật"
+      ? ranked.length + "/" + analyses.length + " video đạt yêu cầu"
       : "Chưa có phân tích";
   }
   const box = el("disc-analysis");
   if (!box) return;
 
   if (!analyses.length) {
-    box.innerHTML = '<div class="empty">Chưa có phân tích AI. Bấm “Tìm kiếm” để chạy phân tích nội dung thật.</div>';
+    box.innerHTML = '<div class="empty">Chưa có phân tích AI. Bấm “Bắt đầu tìm kiếm” để chạy phân tích nội dung thật.</div>';
+    renderPreviewList([]);
     return;
   }
 
-  const note = state.shortfallNote
-    ? '<div class="notif"><div class="notif-kind">Lưu ý</div><div class="notif-msg">' + esc(state.shortfallNote) + "</div></div>"
-    : "";
-
   const cards = ranked.map((a) => {
-    const dims = (a.dimensions || []).map((d) => {
-      const known = d.known !== false;
-      return "<tr>" +
-        "<td>" + esc(d.label) + "</td>" +
-        "<td class='num'>" + (known ? d.points + "/" + d.max_points : "—") + "</td>" +
-        "<td class='muted'>" + esc(known ? d.detail : "CHƯA ĐỦ DỮ LIỆU") + "</td>" +
-        "</tr>";
-    }).join("");
-    const strengths = (a.strengths || []).map((s) => "<li>" + esc(s) + "</li>").join("");
-    const weaknesses = (a.weaknesses || []).map((s) => "<li>" + esc(s) + "</li>").join("");
-    const best = a.rank === 1;
+    const best = Number(a.rank || 0) === 1;
     return "<div class='card' style='border-left:3px solid " + (best ? "var(--accent)" : "var(--line)") + "'>" +
       "<div class='row-between'>" +
         "<strong>" + (a.rank ? "#" + a.rank + " · " : "") + "@" + esc(a.creator || "—") +
         (best ? ' <span class="tag tag-accent">ĐỀ XUẤT TỐT NHẤT</span>' : "") + "</strong>" +
-        "<span class='tag'>" + a.score + "/100</span>" +
+        '<span class="tag">' + num(a.score) + "đ</span>" +
       "</div>" +
       "<div class='muted'>" + esc(a.title || a.source_url || "") + "</div>" +
       "<div class='muted' style='margin-top:4px'>" +
-        esc(a.summary || "") + "</div>" +
-      "<div class='muted' style='margin-top:4px'>" +
-        "Nội dung thật: " + (a.content_analyzed ? "đã phân tích " + (a.frame_count || 0) + " khung hình" : "chưa đọc được") +
-        (a.provider ? " · " + esc(a.provider) : "") +
+        "Lượt xem " + num(a.views) + " · lượt thích " + num(a.likes) + " · điểm xu hướng " + num(a.trend) +
       "</div>" +
-      visionLine(a) +
-      "<table class='table'><thead><tr><th>Tiêu chí</th><th>Điểm</th><th>Lý do</th></tr></thead><tbody>" +
-        dims + "</tbody></table>" +
-      (strengths ? "<div><strong>Điểm mạnh</strong><ul>" + strengths + "</ul></div>" : "") +
-      (weaknesses ? "<div><strong>Điểm yếu</strong><ul>" + weaknesses + "</ul></div>" : "") +
+      "<div class='muted' style='margin-top:4px'>" +
+        "Quyền: " + esc(friendlyRights(a.rights)) +
+      "</div>" +
+      (a.reason ? "<div class='muted' style='margin-top:4px'>" + esc(a.reason) + "</div>" : "") +
       "<div class='row-actions'>" +
         "<button class='btn btn-xs' data-preview-url='" + esc(a.source_url) + "'>Xem trước</button>" +
-        "<button class='btn btn-xs' data-approve='" + esc(a.source_url) + "'>Duyệt</button>" +
-        "<button class='btn btn-xs btn-danger' data-reject='" + esc(a.source_url) + "'>Từ chối</button>" +
       "</div>" +
       "</div>";
   }).join("");
 
   const missing = insufficient.length
     ? '<div class="card"><strong>Chưa đủ dữ liệu (' + insufficient.length + ")</strong>" +
-      '<div class="muted">Các video này không được xếp hạng vì nội dung thật không đọc được hợp lệ. ' +
+      '<div class="muted">Các video này không được xếp hạng vì nội dung thật chưa đủ bằng chứng. ' +
       "Chúng không phải kết quả và không được chọn.</div>" +
-      insufficient.map((a) => "<div class='muted'>@" + esc(a.creator || "—") + " — " + esc(a.insufficient_reason || "không đọc được nội dung") + "</div>").join("") +
+      insufficient.map((a) => "<div class='muted'>@" + esc(a.creator || "—") + " — " + esc(a.reason || "không đủ bằng chứng") + "</div>").join("") +
       "</div>"
     : "";
 
-  const rejected = analyses.filter((a) => a.content_relevant === false);
-  const notMusic = rejected.length
-    ? '<div class="card"><strong>Không phải AI Music (' + rejected.length + ")</strong>" +
-      '<div class="muted">Nội dung thật của các video này không phải AI Music, ' +
-      "nên chúng bị loại và không được xếp hạng.</div>" +
-      rejected.map((a) => "<div class='muted'>@" + esc(a.creator || "—") + " — " + esc(a.content_relevance_reason || a.insufficient_reason || "không phù hợp") + "</div>").join("") +
-      "</div>"
-    : "";
+  box.innerHTML = cards + missing;
 
-  box.innerHTML = note + cards + notMusic + missing;
+  // The preview dropdown lists every candidate of this project only. When
+  // there is no video, the dropdown stays hidden and an empty state is shown.
+  renderPreviewList(analyses);
+}
 
-  // The preview dropdown lists every candidate, so the admin can look at
-  // any of them and not only at the recommended one.
+/* The preview list only contains the videos of the open project and version.
+   An empty dropdown is never shown. */
+function renderPreviewList(videos) {
   const select = el("disc-preview-select");
+  const row = el("disc-preview-row");
+  const empty = el("disc-preview-empty");
+  const list = videos || [];
   if (select) {
     const current = select.value;
-    select.innerHTML = '<option value="">— chọn video để xem trước —</option>' +
-      analyses.map((a) => {
-        const label = "#" + (a.rank || "-") + " · @" + (a.creator || "—") +
-          " · " + (a.score || 0) + " điểm";
-        return "<option value='" + esc(a.source_url) + "'>" + esc(label) + "</option>";
-      }).join("");
-    select.value = current;
+    if (!list.length) {
+      select.innerHTML = "";
+      select.value = "";
+    } else {
+      select.innerHTML = '<option value="">— chọn video để xem trước —</option>' +
+        list.map((a) => {
+          const label = "#" + (a.rank || "-") + " · @" + (a.creator || "—") +
+            " · " + num(a.score) + " điểm";
+          return "<option value='" + esc(a.source_url) + "'>" + esc(label) + "</option>";
+        }).join("");
+      // A video of another project is never kept selected.
+      const stillThere = list.some((a) => a.source_url === current);
+      select.value = stillThere ? current : "";
+    }
   }
+  if (row) row.hidden = !list.length;
+  if (empty) empty.hidden = list.length > 0;
 }
 
 function renderSelected() {
   const card = el("disc-selected-card");
-  const selected = state.selected;
+  // The selected video belongs to the open project only.
+  const selected = p1RunBelongsToCurrentScope() ? state.selected : null;
   if (!selected) {
     card.hidden = true;
     el("disc-selected-score").textContent = "—";
@@ -1308,6 +1900,16 @@ async function rejectCandidate(sourceUrl, reason) {
    The player asks the endpoint directly, because the endpoint streams the
    file and answers the byte ranges the browser player asks for. */
 function playPreview(sourceUrl) {
+  // A video of another project is never played. The preview only accepts a
+  // video that belongs to the open project and version.
+  if (p1state.projectId) {
+    const allowed = p1RunBelongsToCurrentScope() &&
+      (p1runstate.videos || []).some((v) => v.source_url === sourceUrl);
+    if (!allowed) {
+      resetPreview();
+      return;
+    }
+  }
   const box = el("disc-preview-box");
   const stateLabel = el("disc-preview-state");
   const player = el("disc-preview-player");
@@ -1547,21 +2149,189 @@ async function saveSettings() {
   } catch (e) { toast(e.message, "err"); }
 }
 
-async function emergencyStop() {
-  if (!confirm("Dừng toàn bộ automation ngay? Các tác vụ đang chạy sẽ không tiếp tục.")) return;
-  try {
-    await api("/emergency-stop", { method: "POST", body: JSON.stringify({}) });
-    toast("Đã dừng toàn bộ automation.", "ok");
-    await loadOverview();
-  } catch (e) { toast(e.message, "err"); }
+/* ============ global automation control (compact header + dropdown) ========= */
+/* The backend keeps two distinct facts and the control never mixes them up:
+   - emergency_stop is a persisted safety flag that every worker honours.
+   - the background scheduler can be started and stopped on its own.
+   A visible state is only shown after the server confirmed it, and a failed
+   request restores the state that was on screen before. */
+
+const automationState = {
+  overview: null,
+  scheduler: null,
+  busy: false,
+  pending: false,
+};
+
+function automationFacts() {
+  const overview = automationState.overview || {};
+  const scheduler = automationState.scheduler || {};
+  const emergency = !!overview.emergency_stop;
+  // The scheduler has two separate facts: it is configured (enabled) and the
+  // worker is really alive (running). Only a running worker runs a task.
+  const scheduleRunning = !!scheduler.running;
+  return {
+    emergency: emergency,
+    scheduleEnabled: scheduleRunning,
+    scheduleConfigured: !!scheduler.enabled,
+    overview: overview,
+    scheduler: scheduler,
+  };
 }
 
-async function emergencyStart() {
+/* The label describes the safety state first, because that is the state that
+   actually blocks the workers. */
+function automationLabel(facts) {
+  if (facts.emergency) return t("auto.emergency");
+  if (!facts.scheduleEnabled) return t("auto.stopped");
+  return t("auto.running");
+}
+
+function automationDotClass(facts) {
+  if (automationState.busy) return "status-dot is-busy";
+  if (facts.emergency) return "status-dot is-emergency";
+  if (!facts.scheduleEnabled) return "status-dot is-stopped";
+  return "status-dot is-running";
+}
+
+function renderAutomationControl() {
+  const facts = automationFacts();
+  const label = el("automation-label");
+  const dot = el("automation-dot");
+  if (label) label.textContent = automationState.busy ? t("common.saving") : automationLabel(facts);
+  if (dot) {
+    dot.className = automationDotClass(facts);
+    dot.title = automationLabel(facts);
+  }
+
+  const stateLabel = el("automation-state-label");
+  const stateDetail = el("automation-state-detail");
+  if (stateLabel) stateLabel.textContent = automationLabel(facts);
+  if (stateDetail) {
+    const bits = [];
+    bits.push(facts.emergency ? t("auto.emergencyOn") : t("auto.emergencyOff"));
+    bits.push(facts.scheduleEnabled ? t("auto.scheduleOn")
+      : (facts.scheduleConfigured ? t("auto.scheduleConfigured") : t("auto.scheduleOff")));
+    if (overviewAutoPublishOff(facts.overview)) bits.push(t("auto.autoPublishOff"));
+    stateDetail.textContent = bits.join(" ");
+  }
+
+  // The menu never shows two contradictory actions for the same fact.
+  const toggle = el("menu-automation-toggle");
+  if (toggle) {
+    toggle.textContent = facts.emergency ? t("auto.resume") : t("auto.pause");
+    toggle.dataset.action = facts.emergency ? "resume" : "pause";
+    toggle.disabled = automationState.busy;
+  }
+  const emergencyItem = el("menu-automation-emergency");
+  if (emergencyItem) {
+    emergencyItem.hidden = facts.emergency;
+    emergencyItem.textContent = t("auto.emergency");
+    emergencyItem.disabled = automationState.busy;
+  }
+  const scheduleItem = el("menu-automation-scheduler");
+  if (scheduleItem) {
+    scheduleItem.textContent = facts.scheduleEnabled ? t("auto.stopSchedule") : t("auto.startSchedule");
+    scheduleItem.disabled = automationState.busy;
+  }
+  const refreshItem = el("menu-automation-refresh");
+  if (refreshItem) {
+    refreshItem.textContent = t("auto.refresh");
+    refreshItem.disabled = automationState.busy;
+  }
+}
+
+/* Auto Publish is only reported as off. The control never turns it on. */
+function overviewAutoPublishOff(overview) {
+  if (!overview) return true;
+  return !overview.auto_post;
+}
+
+async function refreshAutomationState() {
   try {
-    await api("/emergency-start", { method: "POST", body: JSON.stringify({}) });
-    toast("Đã cho phép automation chạy lại.", "ok");
-    await loadOverview();
-  } catch (e) { toast(e.message, "err"); }
+    const data = await api("/overview");
+    automationState.overview = data;
+  } catch (_) { /* keep the last known state */ }
+  try {
+    const data = await api("/scheduler");
+    automationState.scheduler = data;
+  } catch (_) { /* the scheduler may be off */ }
+  renderAutomationControl();
+  if (typeof renderOverviewAutomation === "function") renderOverviewAutomation();
+}
+
+/* The emergency stop is the safety flag, so it is the only action that asks
+   for a confirmation before it is sent. */
+async function runAutomationAction(action) {
+  if (automationState.busy) return;
+  if (action === "pause" || action === "stop") {
+    const message = action === "stop" ? t("auto.confirmStop") : t("auto.confirmPause");
+    if (!confirm(message)) return;
+  }
+  automationState.busy = true;
+  renderAutomationControl();
+  try {
+    if (action === "resume") {
+      await api("/emergency-start", { method: "POST", body: JSON.stringify({}) });
+      toast(t("auto.doneResume"), "ok");
+    } else if (action === "pause") {
+      await api("/emergency-stop", { method: "POST", body: JSON.stringify({}) });
+      toast(t("auto.donePause"), "ok");
+    } else if (action === "stop") {
+      await api("/emergency-stop", { method: "POST", body: JSON.stringify({}) });
+      toast(t("auto.doneStop"), "ok");
+    } else if (action === "schedule-start") {
+      await api("/scheduler/start", { method: "POST", body: JSON.stringify({}) });
+      toast(t("auto.doneSchedule"), "ok");
+    } else if (action === "schedule-stop") {
+      await api("/scheduler/stop", { method: "POST", body: JSON.stringify({}) });
+      toast(t("auto.doneSchedule"), "ok");
+    }
+  } catch (e) {
+    // The visible state is restored from the server, so a failed request can
+    // never leave a wrong state on screen.
+    toast(t("auto.failed"), "err");
+  } finally {
+    automationState.busy = false;
+    await refreshAutomationState();
+  }
+}
+
+/* The refresh only reloads data. It never starts a discovery and it never
+   publishes anything. */
+async function refreshDataOnly() {
+  const btn = el("menu-automation-refresh");
+  if (btn) btn.disabled = true;
+  try {
+    await loadView(state.view);
+    await loadNotifications();
+  } catch (e) {
+    toast(e.message, "err");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function closeMenus(except) {
+  ["automation-menu", "notif-menu"].forEach((id) => {
+    const menu = el(id);
+    if (!menu || menu === except) return;
+    menu.hidden = true;
+  });
+  ["btn-automation", "btn-notifications"].forEach((id) => {
+    const btn = el(id);
+    if (btn) btn.setAttribute("aria-expanded", "false");
+  });
+}
+
+function toggleMenu(menuId, buttonId) {
+  const menu = el(menuId);
+  if (!menu) return;
+  const wasOpen = !menu.hidden;
+  closeMenus(wasOpen ? null : menu);
+  menu.hidden = wasOpen;
+  const btn = el(buttonId);
+  if (btn) btn.setAttribute("aria-expanded", wasOpen ? "false" : "true");
 }
 
 async function editVideo() {
@@ -1593,14 +2363,55 @@ async function loadNotifications() {
     const items = data.notifications || [];
     const unread = items.filter((n) => !n.read).length;
     setBadge("badge-notif", unread);
-    el("notif-list").innerHTML = items.length
-      ? items.map((n) =>
-          '<div class="notif' + (n.read ? " read" : "") + '">' +
-          '<div class="notif-kind">' + esc(n.kind) + "</div>" +
-          '<div class="notif-msg">' + esc(n.message) + "</div>" +
-          '<div class="notif-at">' + esc(fmtDate(n.at)) + "</div></div>").join("")
-      : '<div class="empty">Không có thông báo.</div>';
+    const html = items.length
+      ? items.map((n) => {
+          const kind = String(n.kind || "");
+          const message = String(n.message || "");
+          // A video that the filter dropped on purpose is not an error, so it
+          // is reported as information and never counted as a critical alert.
+          const critical = !isRoutineNotification(kind, message);
+          return '<div class="notif' + (n.read ? " read" : "") + (critical ? " is-critical" : "") + '">' +
+          '<div class="notif-kind">' + esc(kind) + "</div>" +
+          '<div class="notif-msg">' + esc(notificationMessage(message)) + "</div>" +
+          '<div class="notif-at">' + esc(fmtDate(n.at)) + "</div></div>";
+        }).join("")
+      : '<div class="empty">' + esc(t("notif.empty")) + "</div>";
+    const list = el("notif-list");
+    if (list) list.innerHTML = html;
+    const menuList = el("notif-menu-list");
+    if (menuList) {
+      menuList.innerHTML = items.length
+        ? items.slice(0, 12).map((n) => {
+            const kind = String(n.kind || "");
+            const message = String(n.message || "");
+            const critical = !isRoutineNotification(kind, message);
+            return '<div class="notif' + (n.read ? " read" : "") + (critical ? " is-critical" : "") + '">' +
+              '<div class="notif-kind">' + esc(kind) + "</div>" +
+              '<div class="notif-msg">' + esc(notificationMessage(message)) + "</div>" +
+              '<div class="notif-at">' + esc(fmtDate(n.at)) + "</div></div>";
+          }).join("")
+        : '<div class="empty">' + esc(t("notif.empty")) + "</div>";
+    }
   } catch (e) { /* ignore */ }
+}
+
+/* A normal filter rejection or a successful selection is part of the normal
+   operation, so it is shown as information instead of as a critical alert. */
+function isRoutineNotification(kind, message) {
+  const text = String(message || "").toUpperCase();
+  if (text.indexOf("NO_QUALIFIED_VIDEO") !== -1) return true;
+  if (text.indexOf("ĐÃ CHỌN") !== -1 || text.indexOf("CANDIDATE_FOUND") !== -1) return true;
+  if (String(kind).toLowerCase() === "discovery" && text.indexOf("ERROR") === -1) return true;
+  return false;
+}
+
+/* The raw message is mapped to a readable label when it is a known enum. */
+function notificationMessage(message) {
+  const raw = String(message || "").trim();
+  const upper = raw.toUpperCase();
+  if (upper === "NO_QUALIFIED_VIDEO") return t("status.NO_QUALIFIED_VIDEO");
+  if (upper === "CANDIDATE_FOUND") return t("status.CANDIDATE_FOUND");
+  return raw;
 }
 
 /* ------------------------------------------------------------- init */
@@ -1609,8 +2420,25 @@ function bindEvents() {
   document.querySelectorAll(".nav-item").forEach((btn) => {
     btn.addEventListener("click", () => showView(btn.dataset.view));
   });
+  const advToggle = el("nav-advanced-toggle");
+  if (advToggle && !advToggle.dataset.bound) {
+    advToggle.dataset.bound = "1";
+    const flip = () => {
+      const side = document.querySelector(".sidebar");
+      if (!side) return;
+      side.classList.toggle("hide-advanced");
+      const hidden = side.classList.contains("hide-advanced");
+      advToggle.setAttribute("aria-expanded", hidden ? "false" : "true");
+      advToggle.textContent = hidden ? "Nâng cao ▸" : "Nâng cao ▾";
+    };
+    advToggle.addEventListener("click", flip);
+    advToggle.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); }
+    });
+  }
 
-  el("btn-refresh").addEventListener("click", () => { loadView(state.view); loadNotifications(); });
+  if (el("btn-ov-all-issues")) el("btn-ov-all-issues").addEventListener("click", () => showView("history"));
+  if (el("btn-ov-all-history")) el("btn-ov-all-history").addEventListener("click", () => showView("history"));
   document.querySelectorAll(".tab[data-tab]").forEach((t) => {
     t.addEventListener("click", () => {
       const panel = t.closest(".view") || document;
@@ -1622,8 +2450,16 @@ function bindEvents() {
     });
   });
   if (el("btn-p2-goto")) el("btn-p2-goto").addEventListener("click", () => showView("videos"));
-  el("btn-discover").addEventListener("click", () => runDiscovery(false));
-  el("btn-discover-again").addEventListener("click", () => runDiscovery(false));
+  // The search button of the project workspace creates a version of the open
+  // project. Without an open project it keeps the legacy discovery flow.
+  el("btn-discover").addEventListener("click", () => {
+    if (p1state.projectId) { p1Search(); return; }
+    runDiscovery(false);
+  });
+  el("btn-discover-again").addEventListener("click", () => {
+    if (p1state.projectId) { p1Search(); return; }
+    runDiscovery(false);
+  });
   el("btn-discover-resume").addEventListener("click", () => runDiscovery(true));
   el("btn-discover-stop").addEventListener("click", stopDiscovery);
   // The approve and reject buttons of the chosen video. Nothing is
@@ -1670,15 +2506,85 @@ function bindEvents() {
     } catch (e) { toast(e.message, "err"); }
   });
   el("btn-set-save").addEventListener("click", saveSettings);
-  el("btn-emergency").addEventListener("click", emergencyStop);
-  el("btn-emergency-start").addEventListener("click", emergencyStart);
   el("btn-edit").addEventListener("click", editVideo);
-  el("btn-notifications").addEventListener("click", () => {
-    const drawer = el("notif-drawer");
-    drawer.hidden = !drawer.hidden;
-    if (!drawer.hidden) loadNotifications();
+
+  /* ---- global automation control ---- */
+  if (el("btn-automation")) {
+    el("btn-automation").addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleMenu("automation-menu", "btn-automation");
+    });
+  }
+  if (el("menu-automation-toggle")) {
+    el("menu-automation-toggle").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const action = e.currentTarget.dataset.action;
+      closeMenus(null);
+      runAutomationAction(action);
+    });
+  }
+  if (el("menu-automation-emergency")) {
+    el("menu-automation-emergency").addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeMenus(null);
+      runAutomationAction("stop");
+    });
+  }
+  if (el("menu-automation-scheduler")) {
+    el("menu-automation-scheduler").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const facts = automationFacts();
+      closeMenus(null);
+      runAutomationAction(facts.scheduleEnabled ? "schedule-stop" : "schedule-start");
+    });
+  }
+  if (el("menu-automation-refresh")) {
+    el("menu-automation-refresh").addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeMenus(null);
+      refreshDataOnly();
+    });
+  }
+
+  /* ---- notification popover ---- */
+  if (el("btn-notifications")) {
+    el("btn-notifications").addEventListener("click", (e) => {
+      e.stopPropagation();
+      const opening = el("notif-menu").hidden;
+      toggleMenu("notif-menu", "btn-notifications");
+      if (opening) loadNotifications();
+    });
+  }
+  if (el("btn-notif-menu-close")) {
+    el("btn-notif-menu-close").addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeMenus(null);
+    });
+  }
+  if (el("btn-notif-open-all")) {
+    el("btn-notif-open-all").addEventListener("click", (e) => {
+      e.stopPropagation();
+      closeMenus(null);
+      showView("history");
+    });
+  }
+  if (el("btn-top-settings")) {
+    el("btn-top-settings").addEventListener("click", () => showView("settings"));
+  }
+
+  /* ---- appearance and locale ---- */
+  if (el("set-theme")) {
+    el("set-theme").addEventListener("change", (e) => setTheme(e.target.value));
+  }
+  if (el("set-locale")) {
+    el("set-locale").addEventListener("change", (e) => setLocale(e.target.value));
+  }
+
+  // A click outside the menus closes them, and the escape key does the same.
+  document.addEventListener("click", () => closeMenus(null));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeMenus(null);
   });
-  el("btn-notif-close").addEventListener("click", () => { el("notif-drawer").hidden = true; });
 
   el("chat-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -1739,13 +2645,21 @@ function bindEvents() {
 }
 
 async function init() {
+  // The appearance and the locale are restored before the first render, so
+  // the page never flashes the wrong theme or the wrong language.
+  UI.theme = readStored(THEME_KEY, ["light", "dark", "system"], "light");
+  applyTheme();
+  applyLocale();
+
   bindEvents();
   bindP1();
   const hash = location.hash.replace("#", "");
   showView(TITLES[hash] ? hash : "overview");
   await loadOverview();
+  await refreshAutomationState();
   loadNotifications();
   setInterval(loadNotifications, 20000);
+  setInterval(refreshAutomationState, 30000);
 }
 
 /* ------------------------------------------------ P1 workspace (offline replay) */
@@ -1754,11 +2668,26 @@ const p1state = { projects: [], runs: [], projectId: "", runId: "" };
 
 async function bindP1() {
   try {
-    el("btn-p1-create").addEventListener("click", p1Create);
     el("btn-p1-search").addEventListener("click", p1Search);
     el("btn-p1-open").addEventListener("click", p1Open);
-    el("p1-project").addEventListener("change", (e) => { p1state.projectId = e.target.value; p1state.runId = ""; loadP1Runs(); });
-    el("p1-run").addEventListener("change", (e) => { p1state.runId = e.target.value; renderP1Header(); });
+    // The empty state offers the same search. It never starts on its own.
+    if (el("btn-p1-search-empty")) el("btn-p1-search-empty").addEventListener("click", p1Search);
+    // The filter area opens and closes. It is only a display control, it
+    // never starts a search.
+    if (el("btn-toggle-filters")) el("btn-toggle-filters").addEventListener("click", toggleProjectFilters);
+    // The topic that is shown is the one that would really be sent.
+    if (el("disc-topic")) el("disc-topic").addEventListener("input", renderProjectTopic);
+    if (el("p1-project-topic")) el("p1-project-topic").addEventListener("input", renderProjectTopic);
+    el("p1-run").addEventListener("change", async (e) => {
+      p1state.runId = e.target.value;
+      // The result of the previous version is dropped before the new one is
+      // loaded, so the results of two versions are never mixed.
+      resetP1RunState();
+      renderDiscovery();
+      renderProjectEmptyState();
+      renderP1Header();
+      if (p1state.runId) await loadProjectRunResult();
+    });
     if (el("p1-runs-table")) el("p1-runs-table").addEventListener("click", (e) => {
       const btn = e.target.closest("[data-run-open]");
       if (!btn) return;
@@ -1769,56 +2698,819 @@ async function bindP1() {
     if (el("btn-p2-detail")) el("btn-p2-detail").addEventListener("click", p2Detail);
     if (el("btn-p2-analyze")) el("btn-p2-analyze").addEventListener("click", p2Analyze);
     if (el("btn-p2-download")) el("btn-p2-download").addEventListener("click", p2Download);
+    if (el("p2-auto") && !el("p2-auto").dataset.bound) {
+      el("p2-auto").dataset.bound = "1";
+      el("p2-auto").addEventListener("change", (e) => p2AutoToggle(e.target.value));
+    }
     if (el("btn-p3-create")) el("btn-p3-create").addEventListener("click", p3Create);
     if (el("btn-p3-build")) el("btn-p3-build").addEventListener("click", p3Build);
     if (el("btn-p3-save")) el("btn-p3-save").addEventListener("click", p3Save);
     if (el("btn-p3-approve")) el("btn-p3-approve").addEventListener("click", p3Approve);
     if (el("btn-p3-schedule")) el("btn-p3-schedule").addEventListener("click", p3Schedule);
     if (el("btn-p3-run")) el("btn-p3-run").addEventListener("click", p3Run);
-  } catch (_) { /* workspace optional */ }
+  } catch (e) {
+    // A missing control is a real integration error, so it is reported
+    // instead of being swallowed by one broad catch.
+    console.error("bindP1 failed:", e);
+    toast("Một số nút của workspace chưa gắn được. Xem console để biết chi tiết.", "err");
+  }
+
+  // P4-A.3 project workspace controls.
+  try {
+    if (el("btn-project-create")) el("btn-project-create").addEventListener("click", openProjectCreateModal);
+    if (el("btn-project-back")) el("btn-project-back").addEventListener("click", closeProject);
+    if (el("btn-project-modal-close")) el("btn-project-modal-close").addEventListener("click", closeProjectCreateModal);
+    if (el("btn-project-cancel")) el("btn-project-cancel").addEventListener("click", closeProjectCreateModal);
+    if (el("project-create-form")) el("project-create-form").addEventListener("submit", submitProjectCreate);
+    if (el("project-search")) el("project-search").addEventListener("input", (e) => {
+      projectstate.query = e.target.value;
+      renderProjectList();
+    });
+    if (el("project-filter")) el("project-filter").addEventListener("change", (e) => {
+      projectstate.filter = e.target.value;
+      renderProjectList();
+    });
+    if (el("project-sort")) el("project-sort").addEventListener("change", (e) => {
+      projectstate.sort = e.target.value;
+      renderProjectList();
+    });
+    if (el("project-modal")) el("project-modal").addEventListener("click", (e) => {
+      if (e.target === el("project-modal")) closeProjectCreateModal();
+    });
+    // The list is redrawn whenever it refreshes, so the click is handled
+    // once on the container instead of once per row.
+    if (el("project-list") && !el("project-list").dataset.bound) {
+      el("project-list").dataset.bound = "1";
+      el("project-list").addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-act='open-project']");
+        if (!btn) return;
+        const row = btn.closest("[data-project-id]");
+        if (!row) return;
+        openProject(row.dataset.projectId);
+      });
+    }
+  } catch (e) {
+    console.error("project workspace binding failed:", e);
+  }
+
   await loadP1Projects();
+  await loadProjectSummary();
   await loadP3Settings();
 }
 
 async function loadP1Projects() {
-  const sel = el("p1-project");
-  if (!sel) return;
   try {
     const data = await api("/p1/projects");
     p1state.projects = data.projects || [];
-    const cur = p1state.projectId;
-    sel.innerHTML = p1state.projects.map((p) =>
-      "<option value='" + esc(p.id) + "'>" + esc(p.name || p.topic) + " · " + esc(p.topic) + "</option>").join("")
-      || "<option value=''>— chưa có project —</option>";
-    if (p1state.projects.some((p) => p.id === cur)) sel.value = cur;
-    p1state.projectId = sel.value || "";
+    // The project list is loaded for its own sake, so the workspace knows
+    // the name and topic of every project. A selected project is only
+    // cleared when it really is gone from the backend, and never while a
+    // project detail is still loading.
+    const known = (p1state.projects || []).some((p) => p.id === p1state.projectId);
+    if (p1state.projectId && !known && !projectstate.loading) {
+      p1state.projectId = "";
+      p1state.runId = "";
+    }
     await loadP1Runs();
   } catch (_) { /* offline ok */ }
+}
+
+/* ---------------- P4-A.3 project workspace ---------------- */
+
+const projectstate = { summary: [], detail: null, query: "", filter: "all", sort: "updated", loading: "" };
+
+/* The saved result of the project that is open right now. It is never shared
+   with another project, and it is replaced completely when the project or the
+   version changes, so a result of an older project can never appear here. */
+const p1runstate = {
+  projectId: "",
+  runId: "",
+  status: "",
+  statusReason: "",
+  queries: [],
+  filters: null,
+  funnel: null,
+  top5: [],
+  videos: [],
+  plan: null,
+  queryOutcomes: [],
+  candidates: [],
+  filterDecisions: [],
+  loaded: false,
+};
+
+/* Everything that belongs to a result is cleared in one place. The global
+   discovery state (state.result and friends) belongs to the legacy discovery
+   workspace and is never used to paint a project result. */
+function resetP1RunState() {
+  p1runstate.projectId = "";
+  p1runstate.runId = "";
+  p1runstate.status = "";
+  p1runstate.statusReason = "";
+  p1runstate.queries = [];
+  p1runstate.filters = null;
+  p1runstate.funnel = null;
+  p1runstate.top5 = [];
+  p1runstate.videos = [];
+  p1runstate.plan = null;
+  p1runstate.queryOutcomes = [];
+  p1runstate.candidates = [];
+  p1runstate.filterDecisions = [];
+  p1runstate.loaded = false;
+  // A video that was playing belongs to the project that is left, so the
+  // player is stopped and the preview is cleared with it.
+  resetPreview();
+}
+
+/* The preview is cleared completely. No video of a previous project keeps
+   playing and no old frame stays visible. */
+function resetPreview() {
+  const player = el("disc-preview-player");
+  if (player) {
+    try { player.pause(); } catch (_) { /* ignore */ }
+    player.removeAttribute("src");
+    player.hidden = true;
+  }
+  const still = el("disc-preview-still");
+  if (still) {
+    still.removeAttribute("src");
+    still.hidden = true;
+  }
+  const select = el("disc-preview-select");
+  if (select) {
+    select.innerHTML = "";
+    select.value = "";
+  }
+  const row = el("disc-preview-row");
+  if (row) row.hidden = true;
+  const empty = el("disc-preview-empty");
+  if (empty) {
+    empty.hidden = false;
+    empty.textContent = t("p1.preview.empty");
+  }
+  const label = el("disc-preview-state");
+  if (label) label.textContent = "—";
+}
+
+/* The results of the open project are only shown when the loaded data really
+   belongs to that project and to the version that is selected. */
+function p1RunBelongsToCurrentScope() {
+  if (!p1state.projectId || !p1runstate.projectId) return false;
+  if (String(p1runstate.projectId) !== String(p1state.projectId)) return false;
+  if (!p1state.runId) return false;
+  return String(p1runstate.runId) === String(p1state.runId);
+}
+
+/* The filter area opens and closes. It is a display control only, so it
+   never starts a search and never changes the saved topic. */
+function toggleProjectFilters() {
+  const panel = el("project-filters");
+  const button = el("btn-toggle-filters");
+  if (!panel) return;
+  const open = panel.hidden;
+  panel.hidden = !open;
+  if (button) {
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+    const caret = button.querySelector(".caret");
+    if (caret) caret.textContent = open ? "▴" : "▾";
+  }
+}
+
+/* The topic that is really used for the next search. It is the explicit
+   filter topic when there is one, otherwise the topic of the project. */
+function renderProjectTopic() {
+  const project = (p1state.projects || []).find((p) => p.id === p1state.projectId) || {};
+  const configured = (el("disc-topic") && el("disc-topic").value) || "";
+  const saved = (el("p1-project-topic") && el("p1-project-topic").value) ||
+    String(project.topic || "");
+  const topic = (configured.trim() || String(saved).trim());
+  const box = el("p1-topic-display");
+  if (box) box.textContent = topic || "—";
+  // The empty state shows the topic of the project as well.
+  const label = el("project-empty-topic");
+  if (label) label.textContent = topic ? "Chủ đề: " + topic : "";
+}
+
+function projectFiltered() {
+  const q = (projectstate.query || "").trim().toLowerCase();
+  const filter = projectstate.filter || "all";
+  let rows = (projectstate.summary || []).slice();
+  if (q) {
+    rows = rows.filter((p) =>
+      String(p.name || "").toLowerCase().includes(q) ||
+      String(p.topic || "").toLowerCase().includes(q));
+  }
+  if (filter === "pending") rows = rows.filter((p) => Number(p.pending_approval || 0) > 0);
+  else if (filter === "issues") rows = rows.filter((p) => Number(p.blockers || 0) > 0);
+  else if (filter === "active") {
+    rows = rows.filter((p) => Number(p.versions || 0) > 0 || Number(p.publications || 0) > 0);
+  }
+  const sort = projectstate.sort || "updated";
+  rows.sort((a, b) => {
+    if (sort === "name") return String(a.name || a.topic || "").localeCompare(String(b.name || b.topic || ""), "vi");
+    if (sort === "created") return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+    return String(b.latest_activity || "").localeCompare(String(a.latest_activity || ""));
+  });
+  return rows;
+}
+
+function renderProjectList() {
+  const box = el("project-list");
+  if (!box) return;
+  const rows = projectFiltered();
+  const counter = el("project-count");
+  if (counter) counter.textContent = rows.length + "/" + (projectstate.summary || []).length + " dự án";
+  if (!rows.length) {
+    box.innerHTML = "<div class='empty'>" +
+      ((projectstate.summary || []).length
+        ? "Không có dự án nào khớp bộ lọc hiện tại."
+        : "Chưa có dự án. Bấm “Tạo dự án” để bắt đầu.") + "</div>";
+    return;
+  }
+  box.innerHTML = rows.map((p) => {
+    const issues = Number(p.blockers || 0);
+    const pending = Number(p.pending_approval || 0);
+    const bits = [];
+    bits.push("<span class='tag'>" + num(p.versions) + " phiên bản</span>");
+    bits.push("<span class='tag'>" + num(p.publications) + " bài đăng</span>");
+    bits.push("<span class='tag" + (Number(p.published_verified || 0) ? " tag-ok" : "") + "'>" +
+      num(p.published_verified) + " đã đăng (xác minh)</span>");
+    if (pending) bits.push("<span class='tag tag-warn'>" + num(pending) + " chờ duyệt</span>");
+    if (issues) bits.push("<span class='tag tag-danger'>" + num(issues) + " vấn đề</span>");
+    return "<div class='project-row' data-project-id='" + esc(p.id) + "'>" +
+      "<div class='project-row-main'>" +
+      "<div class='project-row-title'>" + esc(p.name || p.topic || "Dự án") + "</div>" +
+      "<div class='project-row-topic'>Chủ đề: " + esc(p.topic || "—") + "</div>" +
+      "<div class='project-row-meta'>Cập nhật gần nhất: " + esc(friendlySchedule(p.latest_activity)) + "</div>" +
+      "<div class='project-row-tags'>" + bits.join("") + "</div>" +
+      "</div>" +
+      "<div class='project-row-side'>" +
+      "<button class='btn btn-primary' data-act='open-project'>Mở dự án</button>" +
+      "</div></div>";
+  }).join("");
+}
+
+async function loadProjectSummary() {
+  try {
+    const data = await api("/p1/projects/summary");
+    projectstate.summary = data.projects || [];
+    renderProjectList();
+  } catch (e) {
+    const box = el("project-list");
+    if (box) box.innerHTML = "<div class='empty'>Không tải được danh sách dự án: " + esc(e.message) + "</div>";
+  }
+}
+
+// The Video Lab and Publishing views show which project they belong to.
+// The notice has to follow the project selection immediately, not only when
+// one of those views is opened, so the scope is never ambiguous.
+function renderProjectContext() {
+  const project = (p1state.projects || []).find((p) => p.id === p1state.projectId) || null;
+  const run = (p1state.runs || []).find((r) => r.id === p1state.runId) || null;
+  const runId = p1state.runId || "";
+  const p2ctx = el("p2-lab-context");
+  if (p2ctx) {
+    p2ctx.textContent = project
+      ? ("Dự án: " + (project.name || project.topic || "—") +
+         (runId ? " · Phiên bản: " + ((run && run.version) || runId) : " · Chưa mở phiên bản"))
+      : "Chọn dự án và phiên bản ở trang Dự án trước.";
+  }
+  const p3ctx = el("p3-project-context");
+  if (p3ctx) {
+    p3ctx.textContent = project
+      ? ("Dự án: " + (project.name || project.topic || "—") + " · " + (project.topic ? "chủ đề " + project.topic : ""))
+      : "Chưa chọn dự án — đang hiển thị tất cả dự án.";
+  }
+}
+
+async function openProject(projectId) {
+  if (!projectId) return;
+  projectstate.lastError = "";
+  // The selected project is set first so every loader that runs in
+  // parallel already sees the right project.
+  p1state.projectId = projectId;
+  p1state.runId = "";
+  p3state.id = "";
+  // The loading flag protects the selection while the project is loading.
+  projectstate.loading = projectId;
+  // The project list is loaded so the name and topic are known before the
+  // header is rendered.
+  if (!(p1state.projects || []).some((p) => p.id === projectId)) {
+    try {
+      const list = await api("/p1/projects");
+      p1state.projects = list.projects || [];
+    } catch (_) { /* offline ok */ }
+  }
+  // Every result of the previous project is dropped before the new project
+  // is shown, so nothing of another project can appear here.
+  resetP1RunState();
+  state.top5 = [];
+  state.funnel = null;
+  state.candidates = [];
+  state.selected = null;
+  state.topicQueries = [];
+  state.queryStats = {};
+  state.queryTotal = 0;
+  state.appliedFilters = null;
+  state.needsReview = [];
+  state.analyses = [];
+  renderTop5();
+  renderDiscovery();
+  const detail = el("project-detail");
+  if (detail) detail.hidden = false;
+  const listCard = el("project-list");
+  if (listCard) listCard.closest(".card").hidden = true;
+  const head = el("project-search");
+  if (head) head.closest(".card").hidden = true;
+  renderProjectContext();
+  await loadProjectDetail(projectId);
+}
+
+function closeProject() {
+  const detail = el("project-detail");
+  if (detail) detail.hidden = true;
+  const listCard = el("project-list");
+  if (listCard) listCard.closest(".card").hidden = false;
+  const head = el("project-search");
+  if (head) head.closest(".card").hidden = false;
+  p1state.projectId = "";
+  p1state.runId = "";
+  p3state.id = "";
+  // The saved result belongs to the project that is closed, so it goes with it.
+  resetP1RunState();
+  state.top5 = [];
+  state.funnel = null;
+  state.candidates = [];
+  state.selected = null;
+  state.topicQueries = [];
+  state.queryStats = {};
+  state.queryTotal = 0;
+  state.appliedFilters = null;
+  state.needsReview = [];
+  state.analyses = [];
+  renderTop5();
+  renderDiscovery();
+  renderP1Header();
+  renderProjectList();
+  renderProjectContext();
+}
+
+async function loadProjectDetail(projectId) {
+  if (!projectId) return;
+  projectstate.loading = projectId;
+  try {
+    // The project list may still be loading when a project is opened from
+    // the list, so the names are loaded here as well.
+    if (!(p1state.projects || []).some((p) => p.id === projectId)) {
+      try {
+        const list = await api("/p1/projects");
+        p1state.projects = list.projects || [];
+      } catch (_) { /* offline ok */ }
+    }
+    const data = await api("/p1/project?project_id=" + encodeURIComponent(projectId));
+    projectstate.detail = data;
+    // The backend returns the project itself, so the header never depends
+    // on a second request.
+    if (data.project && data.project.id === projectId) {
+      const known = (p1state.projects || []).some((p) => p.id === projectId);
+      if (!known) p1state.projects = (p1state.projects || []).concat([data.project]);
+    }
+    const project = data.project || (p1state.projects || []).find((p) => p.id === projectId) || {};
+    const summary = (projectstate.summary || []).find((p) => p.id === projectId) || {};
+    const name = project.name || summary.name || project.topic || summary.topic || "Dự án";
+    const topic = project.topic || summary.topic || "";
+    if (el("p1-project-name")) el("p1-project-name").textContent = name;
+    if (el("p1-project-meta")) {
+      el("p1-project-meta").textContent = "Chủ đề: " + (topic || "—") +
+        " · " + num(summary.versions) + " phiên bản · " + num(summary.publications) + " bài đăng";
+    }
+    if (el("p1-project-topic")) el("p1-project-topic").value = topic;
+    if (el("disc-topic")) el("disc-topic").value = topic;
+    renderProjectTopic();
+    renderProjectSummary(summary, data);
+    renderProjectActivity(data);
+    renderProjectPublications(data);
+    renderP1Header();
+    await loadP1Runs();
+    renderProjectContext();
+    // The saved result of this exact project is loaded. The backend refuses a
+    // run that belongs to another project, so a result can never leak in.
+    await loadProjectRunResult();
+  } catch (e) {
+    console.error("loadProjectDetail failed:", e);
+    const box = el("project-summary");
+    if (box) {
+      box.innerHTML = "<div class='empty'>Không tải được chi tiết dự án: " + esc(e.message || String(e)) + "</div>";
+    }
+    toast(e.message || "Không tải được chi tiết dự án.", "err");
+  }
+  finally { projectstate.loading = ""; }
+}
+
+function renderProjectSummary(summary, detail) {
+  const box = el("project-summary");
+  if (!box) return;
+  const runs = (detail && detail.runs) || [];
+  const videos = (detail && detail.videos) || [];
+  const pubs = (detail && detail.publications) || [];
+  const verified = pubs.filter((p) => String(p.status || "") === "PUBLISHED" && String(p.posted_url || ""));
+  const pending = pubs.filter((p) => ["DRAFT", "CAPTION_READY"].includes(String(p.status || "")));
+  const blockers = pubs.filter((p) => ["RIGHTS_REQUIRED", "FAILED"].includes(String(p.status || "")));
+  const items = [
+    ["Video tìm thấy", videos.length, ""],
+    ["Phiên bản", runs.length, ""],
+    ["Bài đăng", pubs.length, ""],
+    ["Đã đăng (xác minh)", verified.length, verified.length ? "ok" : ""],
+    ["Chờ duyệt", pending.length, pending.length ? "warn" : ""],
+    ["Vấn đề", blockers.length, blockers.length ? "danger" : ""],
+  ];
+  box.innerHTML = items.map(([label, value, kind]) =>
+    '<div class="stat ' + (kind || "") + '">' +
+    '<div class="stat-label">' + esc(label) + "</div>" +
+    '<div class="stat-value">' + num(value) + "</div></div>").join("");
+}
+
+function renderProjectActivity(detail) {
+  const box = el("project-activity");
+  if (!box) return;
+  const runs = ((detail && detail.runs) || []).slice().sort(
+    (a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))
+  ).slice(0, 5);
+  const pubs = ((detail && detail.publications) || []).slice().sort(
+    (a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || ""))
+  ).slice(0, 5);
+  const events = [];
+  runs.forEach((r) => events.push({
+    at: String(r.created_at || ""),
+    text: "Đã lưu phiên bản " + (r.version || r.id),
+    kind: "",
+  }));
+  pubs.forEach((p) => events.push({
+    at: String(p.updated_at || p.created_at || ""),
+    text: "Bài đăng " + (p.id || "") + " — " + friendlyPubStatus(p.status),
+    kind: statusKind(p.status),
+  }));
+  events.sort((a, b) => String(b.at || "").localeCompare(String(a.at || "")));
+  if (!events.length) {
+    box.innerHTML = "<div class='empty'>Chưa có hoạt động. Mở một phiên bản đã lưu hoặc chạy tìm kiếm mới.</div>";
+    return;
+  }
+  box.innerHTML = events.slice(0, 5).map((e) =>
+    '<div class="notif"><div class="notif-kind">' + esc(friendlySchedule(e.at)) + "</div>" +
+    '<div class="notif-msg">' + esc(e.text) + "</div></div>").join("");
+}
+
+function renderProjectPublications(detail) {
+  const box = el("project-pubs");
+  if (!box) return;
+  const pubs = (detail && detail.publications) || [];
+  const counter = el("project-pub-count");
+  if (counter) counter.textContent = String(pubs.length);
+  if (!pubs.length) {
+    box.innerHTML = "<div class='empty'>Dự án này chưa có bài đăng nào.</div>";
+    return;
+  }
+  box.innerHTML = pubs.map((p) =>
+    '<div class="notif" data-pub-id="' + esc(p.id) + '">' +
+    '<div class="notif-kind">' + esc(friendlyPubStatus(p.status)) + "</div>" +
+    '<div class="notif-msg">Tài khoản: @' + esc(p.account || "—") +
+    " · Lịch: " + esc(friendlySchedule(p.scheduled_at)) +
+    (p.posted_url ? " · <a href='" + esc(p.posted_url) + "' target='_blank' rel='noreferrer' style='color:var(--burgundy-ink)'>xem bài đăng</a>" : "") +
+    "</div></div>").join("");
+}
+
+function openProjectCreateModal() {
+  const modal = el("project-modal");
+  if (!modal) return;
+  modal.hidden = false;
+  if (el("project-name")) el("project-name").value = "";
+  if (el("project-topic")) el("project-topic").value = "";
+  clearProjectFormErrors();
+  const first = el("project-name");
+  if (first) first.focus();
+}
+
+function closeProjectCreateModal() {
+  const modal = el("project-modal");
+  if (modal) modal.hidden = true;
+}
+
+function clearProjectFormErrors() {
+  [["project-name-error", "project-name"], ["project-topic-error", "project-topic"]].forEach(([errId, inputId]) => {
+    const err = el(errId);
+    if (err) { err.hidden = true; err.textContent = ""; }
+    const input = el(inputId);
+    if (input) input.removeAttribute("aria-invalid");
+  });
+}
+
+async function submitProjectCreate(e) {
+  if (e) e.preventDefault();
+  clearProjectFormErrors();
+  const name = ((el("project-name") && el("project-name").value) || "").trim();
+  const topic = ((el("project-topic") && el("project-topic").value) || "").trim();
+  let invalid = false;
+  if (!name) {
+    const err = el("project-name-error");
+    if (err) { err.textContent = "Nhập tên dự án."; err.hidden = false; }
+    if (el("project-name")) el("project-name").setAttribute("aria-invalid", "true");
+    invalid = true;
+  }
+  if (!topic) {
+    const err = el("project-topic-error");
+    if (err) { err.textContent = "Nhập chủ đề tìm kiếm."; err.hidden = false; }
+    if (el("project-topic")) el("project-topic").setAttribute("aria-invalid", "true");
+    invalid = true;
+  }
+  if (invalid) return;
+  const submit = el("btn-project-submit");
+  if (submit) { submit.disabled = true; submit.textContent = "Đang tạo…"; }
+  try {
+    const res = await api("/p1/projects", { method: "POST", body: JSON.stringify({ name, topic }) });
+    const created = (res && res.project) || {};
+    closeProjectCreateModal();
+    await loadP1Projects();
+    await loadProjectSummary();
+    toast("Đã tạo dự án " + (created.name || name) + ".", "ok");
+    if (created.id) openProject(created.id);
+  } catch (err) {
+    toast(err.message || "Không tạo được dự án.", "err");
+  } finally {
+    if (submit) { submit.disabled = false; submit.textContent = "Tạo dự án"; }
+  }
 }
 
 async function loadP1Runs() {
   const sel = el("p1-run");
   if (!sel) return;
-  if (!p1state.projectId) { sel.innerHTML = "<option value=''>—</option>"; return; }
+  if (!p1state.projectId) { sel.innerHTML = "<option value=''>—</option>"; resetP1RunState(); renderTop5(); return; }
+  const wanted = p1state.runId;
+  const forProject = p1state.projectId;
   try {
-    const data = await api("/p1/runs?project_id=" + encodeURIComponent(p1state.projectId));
+    const data = await api("/p1/runs?project_id=" + encodeURIComponent(forProject));
+    // The project may have changed while the request was in flight.
+    if (forProject !== p1state.projectId) return;
     p1state.runs = data.runs || [];
     sel.innerHTML = p1state.runs.map((r) =>
       "<option value='" + esc(r.id) + "'>" + esc(r.version) + " · " + esc(r.created_at || "") + "</option>").join("")
-      || "<option value=''>— chưa có run —</option>";
-    p1state.runId = sel.value || "";
+      || "<option value=''>— chưa có phiên bản —</option>";
+    // Keep the selected version when it still exists in this project. When a
+    // project is opened, the newest version is the one that is shown.
+    const stillThere = p1state.runs.some((r) => r.id === wanted);
+    if (stillThere) {
+      p1state.runId = wanted;
+      sel.value = wanted;
+    } else if (p1state.runs.length) {
+      const newest = p1state.runs[p1state.runs.length - 1];
+      p1state.runId = newest.id;
+      sel.value = newest.id;
+    } else {
+      // The project has no version at all, so there is no result either.
+      p1state.runId = "";
+      resetP1RunState();
+    }
     renderP1Header();
+    renderDiscovery();
   } catch (_) { /* offline ok */ }
 }
 
+/* The saved result of the selected version of the open project. The backend
+   checks that the run belongs to the project, so a result of another project
+   is rejected instead of being displayed. */
+async function loadProjectRunResult() {
+  const forProject = p1state.projectId;
+  const forRun = p1state.runId;
+  if (!forProject || !forRun) {
+    resetP1RunState();
+    renderDiscovery();
+    renderProjectEmptyState();
+    return;
+  }
+  try {
+    const res = await api("/p1/run?project_id=" + encodeURIComponent(forProject) +
+      "&run_id=" + encodeURIComponent(forRun));
+    // The project or the version may have changed while the request was in
+    // flight, so the answer is dropped when it is no longer the current scope.
+    if (forProject !== p1state.projectId || forRun !== p1state.runId) return;
+    const run = res.run || {};
+    if (String(run.project_id || "") !== String(forProject)) {
+      resetP1RunState();
+      renderDiscovery();
+      renderProjectEmptyState();
+      return;
+    }
+    p1runstate.projectId = forProject;
+    p1runstate.runId = forRun;
+    p1runstate.queries = parseJsonField(run.queries_json, []);
+    p1runstate.filters = parseJsonField(run.filters_json, null);
+    p1runstate.funnel = parseJsonField(run.funnel_json, null);
+    p1runstate.top5 = parseJsonField(run.top5_json, []);
+    p1runstate.videos = run.videos || [];
+    // The logical status is resolved from the data the run really holds, so
+    // a historical empty run is never shown as a false success.
+    p1runstate.status = resolveP1RunStatus(run, p1runstate.funnel, p1runstate.videos);
+    // The full research dataset of the run. A historical run without these
+    // fields still loads, it simply shows no plan and no diagnostics.
+    const snapshot = parseJsonField(run.snapshot_json, {}) || {};
+    p1runstate.plan = snapshot.plan || null;
+    p1runstate.statusReason = String(snapshot.status_reason || "");
+    p1runstate.queryOutcomes = snapshot.query_outcomes || [];
+    p1runstate.candidates = snapshot.candidates || [];
+    p1runstate.filterDecisions = snapshot.filter_decisions || [];
+    p1runstate.loaded = true;
+    // The whole result view is painted again, so the counter, the table and
+    // the preview follow the run that was just loaded.
+    renderDiscovery();
+    renderProjectEmptyState();
+    renderP1SearchPlan();
+    renderP1Funnel();
+    renderP1Diagnostics();
+    setP1RunStatus(p1runstate.status, p1runstate.statusReason);
+  } catch (e) {
+    // A missing or foreign run leaves the project without a result.
+    if (forProject !== p1state.projectId || forRun !== p1state.runId) return;
+    resetP1RunState();
+    renderDiscovery();
+    renderProjectEmptyState();
+    renderP1SearchPlan();
+    renderP1Funnel();
+    renderP1Diagnostics();
+  }
+}
+
+/* The search plan of the open run: the directions that were searched and
+   why each of them belongs to the topic. */
+function renderP1SearchPlan() {
+  const box = el("p1-search-plan");
+  const counter = el("p1-plan-count");
+  if (!box) return;
+  const plan = p1runstate.plan;
+  const specs = (plan && plan.queries) || [];
+  if (!specs.length) {
+    box.innerHTML = '<div class="empty">Chưa có kế hoạch. Bấm “Bắt đầu tìm kiếm” để tạo kế hoạch truy vấn.</div>';
+    if (counter) counter.textContent = "Chưa có kế hoạch";
+    return;
+  }
+  if (counter) {
+    counter.textContent = specs.length + " truy vấn" +
+      (plan.confidence ? " · độ tin cậy " + plan.confidence : "");
+  }
+  const dims = (plan.dimensions || []).map((d) => '<span class="filter-chip">' + esc(d) + "</span>").join(" ");
+  const notes = (plan.notes || []).map((n) => '<div class="muted small">' + esc(n) + "</div>").join("");
+  box.innerHTML =
+    (dims ? '<div class="row wrap">' + dims + "</div>" : "") +
+    '<div class="table-wrap"><table class="table"><thead><tr>' +
+    "<th>#</th><th>Truy vấn</th><th>Nhóm</th><th>Vì sao thuộc chủ đề</th>" +
+    "</tr></thead><tbody>" +
+    specs.map((q, i) =>
+      "<tr><td>" + (i + 1) + "</td>" +
+      "<td><strong>" + esc(q.query || "") + "</strong></td>" +
+      "<td><span class='tag'>" + esc(q.group || "") + "</span></td>" +
+      "<td class='muted'>" + esc(q.reason || "") + "</td></tr>"
+    ).join("") +
+    "</tbody></table></div>" +
+    notes;
+}
+
+/* The compact funnel summary. Every counter is shown, including the ones
+   that are zero, so an empty run shows where it became empty. */
+const P1_FUNNEL_LABELS = [
+  ["RAW_RETURNED", "Nguồn trả về"],
+  ["PARSED", "Đã phân tích"],
+  ["DEDUPLICATED", "Sau loại trùng"],
+  ["USER_FILTER_PASSED", "Qua bộ lọc"],
+  ["RELEVANT", "Liên quan (verified)"],
+  ["NEEDS_REVIEW", "Cần xem xét"],
+  ["RANKED", "Đã xếp hạng"],
+  ["TOP5", "TOP 5"],
+];
+
+function renderP1Funnel() {
+  const box = el("p1-funnel");
+  const statusEl = el("p1-funnel-status");
+  if (!box) return;
+  const funnel = p1runstate.funnel;
+  if (!funnel) {
+    box.innerHTML = '<div class="empty">Chưa có dữ liệu phễu.</div>';
+    if (statusEl) statusEl.textContent = "—";
+    return;
+  }
+  // The counter is read under its documented name first, then under the
+  // legacy short name, so a historical run renders correctly too.
+  const LEGACY_NAMES = {
+    RAW_RETURNED: "raw",
+    PARSED: "parsed",
+    DEDUPLICATED: "dedup",
+    USER_FILTER_PASSED: "filtered",
+    RELEVANT: "verified",
+    NEEDS_REVIEW: "needs_review",
+    RANKED: "ranked",
+    TOP5: "top5",
+  };
+  const value = (key) => {
+    const raw = funnel[key];
+    if (raw !== undefined && raw !== null) return raw;
+    const legacy = LEGACY_NAMES[key];
+    if (legacy && funnel[legacy] !== undefined && funnel[legacy] !== null) {
+      return funnel[legacy];
+    }
+    return 0;
+  };
+  if (statusEl) {
+    const label = (P1_RUN_LABELS[p1runstate.status] || ["—", ""])[0];
+    statusEl.textContent = label;
+    statusEl.title = p1runstate.statusReason || "";
+  }
+  box.innerHTML =
+    '<div class="funnel-strip">' +
+    P1_FUNNEL_LABELS.map(([key, label]) =>
+      '<div class="funnel-step"><div class="funnel-value">' + esc(String(value(key))) +
+      '</div><div class="funnel-label">' + esc(label) + "</div></div>"
+    ).join("") +
+    "</div>" +
+    (p1runstate.statusReason ? '<div class="muted small">' + esc(p1runstate.statusReason) + "</div>" : "");
+}
+
+/* The expandable diagnostics: per-query status, counts and reasons. */
+function renderP1Diagnostics() {
+  const box = el("p1-diagnostics");
+  if (!box) return;
+  const outcomes = p1runstate.queryOutcomes || [];
+  if (!outcomes.length) {
+    box.innerHTML = '<div class="empty">Chưa có chẩn đoán.</div>';
+    return;
+  }
+  const rows = outcomes.map((o, i) =>
+    "<tr><td>" + (i + 1) + "</td>" +
+    "<td>" + esc(o.query || "") + "</td>" +
+    "<td><span class='tag'>" + esc(o.status || "") + "</span></td>" +
+    "<td class='num'>" + esc(String(o.raw_count === undefined ? 0 : o.raw_count)) + "</td>" +
+    "<td class='num'>" + esc(String(o.attempts === undefined ? 0 : o.attempts)) + "</td>" +
+    "<td class='muted'>" + esc(o.started_at || "") + " → " + esc(o.ended_at || "") + "</td>" +
+    "<td class='muted'>" + esc(o.note || "") + "</td></tr>"
+  ).join("");
+  const decisions = (p1runstate.filterDecisions || []).map((d) =>
+    "<li>" + esc(d) + "</li>").join("");
+  box.innerHTML =
+    "<h4>Kết quả từng truy vấn</h4>" +
+    '<div class="table-wrap"><table class="table"><thead><tr>' +
+    "<th>#</th><th>Truy vấn</th><th>Trạng thái</th><th>Raw</th><th>Lần thử</th><th>Thời gian</th><th>Lý do</th>" +
+    "</tr></thead><tbody>" + rows + "</tbody></table></div>" +
+    (decisions
+      ? "<h4>Video bị bộ lọc loại (" + (p1runstate.filterDecisions || []).length + ")</h4><ul class='small'>" + decisions + "</ul>"
+      : "");
+}
+
+function parseJsonField(raw, fallback) {
+  if (raw === null || raw === undefined || raw === "") return fallback;
+  try {
+    const value = JSON.parse(raw);
+    return value === null || value === undefined ? fallback : value;
+  } catch (_) {
+    return fallback;
+  }
+}
+
+/* The empty state of a project that has no research result yet. It only
+   shows the project name, the topic and the button that starts a search. */
+function renderProjectEmptyState() {
+  const box = el("project-empty");
+  if (!box) return;
+  const hasResult = p1RunBelongsToCurrentScope() && (p1runstate.videos || []).length > 0;
+  const hasRuns = (p1state.runs || []).length > 0;
+  box.hidden = hasResult;
+  const topic = el("p1-project-topic");
+  const topicText = topic && topic.value ? topic.value.trim() : "";
+  const label = el("project-empty-topic");
+  if (label) label.textContent = topicText ? t("p1.empty.topic") + topicText : "";
+  const note = el("project-empty-note");
+  if (note) {
+    note.textContent = hasRuns ? t("p1.empty.noteRuns") : t("p1.empty.note");
+  }
+}
+
 function renderP1Header() {
-  const proj = (p1state.projects || []).find((p) => p.id === p1state.projectId) || null;
-  if (el("p1-project-name")) el("p1-project-name").textContent = proj ? (proj.name || proj.topic || "Project") : "Project";
+  // The project name comes from the loaded projects, and falls back to the
+  // summary so the header is correct even before the list is loaded.
+  let proj = (p1state.projects || []).find((p) => p.id === p1state.projectId) || null;
+  if (!proj) {
+    const sum = (projectstate.summary || []).find((p) => p.id === p1state.projectId) || null;
+    if (sum) proj = { id: sum.id, name: sum.name, topic: sum.topic };
+  }
+  // The header is always rendered from the current project state.
+  if (!p1state.projectId) {
+    if (el("p1-project-name")) el("p1-project-name").textContent = "Dự án";
+    if (el("p1-project-meta")) el("p1-project-meta").textContent = "Chưa chọn dự án.";
+    return;
+  }
+  if (el("p1-project-name")) {
+    el("p1-project-name").textContent = proj ? (proj.name || proj.topic || "Dự án") : "Dự án";
+  }
   const run = (p1state.runs || []).find((r) => r.id === p1state.runId) || (p1state.runs || [])[0] || null;
   if (el("p1-project-meta")) {
     el("p1-project-meta").textContent = proj
-      ? ("Chủ đề: " + (proj.topic || "—") + " · Version: " + (run ? (run.version || run.id) : "chưa có") + " · " + (p1state.runs || []).length + " version")
-      : "Chưa chọn project.";
+      ? ("Chủ đề: " + (proj.topic || "—") + " · Phiên bản: " + (run ? (run.version || run.id) : "chưa có") + " · " + (p1state.runs || []).length + " phiên bản")
+      : "Chưa chọn dự án.";
   }
   const box = el("p1-runs-table");
   if (box) {
@@ -1832,60 +3524,236 @@ function renderP1Header() {
   }
 }
 
-async function p1Create() {
-  const topic = (el("p1-new-topic").value || "").trim() || (el("disc-topic").value || "").trim();
-  if (!topic) { toast("Nhập chủ đề project.", "err"); return; }
-  try {
-    const res = await api("/p1/projects", { method: "POST", body: JSON.stringify({ name: topic, topic }) });
-    p1state.projectId = (res.project && res.project.id) || "";
-    toast("Đã tạo project " + topic + ".", "ok");
-    await loadP1Projects();
-  } catch (e) { toast(e.message, "err"); }
+/* The filter payload of the project search.
+
+   Every field is read from the DOM VALUE, never from the placeholder. An
+   empty field is sent as 0 / "", which the backend reads as "no
+   constraint". There is no default market, language, age or metric limit,
+   and the strict preset is only sent when the user explicitly selects it. */
+function p1Filters() {
+  const g = (id) => {
+    const node = el(id);
+    return node ? String(node.value || "").trim() : "";
+  };
+  const num = (id) => {
+    const raw = g(id);
+    if (raw === "") return 0;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : 0;
+  };
+  const filters = {
+    min_views: num("disc-min-views"),
+    max_views: num("disc-max-views"),
+    min_likes: num("disc-min-likes"),
+    min_comments: num("disc-min-comments"),
+    min_shares: num("disc-min-shares"),
+    min_duration: num("disc-min-duration"),
+    max_duration: num("disc-max-duration"),
+    max_days: num("disc-days"),
+    must_include: g("disc-must"),
+    must_include_any: g("disc-must-any"),
+    subtopics: g("disc-subtopics"),
+    exclude: g("disc-exclude"),
+    // Language and market cannot be verified from the source payload. They
+    // are recorded as a note, never as a filter that pretends to work.
+    language: "",
+    market: "",
+  };
+  // The strict preset is an explicit, opt-in compatibility mode.
+  if (g("disc-preset") === "strict") {
+    filters.strict_preset = true;
+  }
+  return filters;
 }
 
-function p1Filters() {
-  const g = (id) => (el(id) ? el(id).value : "");
-  return {
-    min_views: Number(g("disc-min-views")) || 0,
-    max_views: Number(g("disc-max-views")) || 0,
-    min_likes: Number(g("disc-min-likes")) || 0,
-    min_comments: Number(g("disc-min-comments")) || 0,
-    min_shares: Number(g("disc-min-shares")) || 0,
-    min_duration: Number(g("disc-min-duration")) || 0,
-    max_duration: Number(g("disc-max-duration")) || 0,
-    max_days: Number(g("disc-days")) || 0,
-    must_include: g("disc-must"), must_include_any: g("disc-must-any"),
-    subtopics: g("disc-subtopics"), exclude: g("disc-exclude"),
+/* The list of constraints that are really active, so the user can see
+   them before the search runs. */
+function p1ActiveFilterLabels() {
+  const labels = [];
+  const g = (id) => {
+    const node = el(id);
+    return node ? String(node.value || "").trim() : "";
   };
+  const num = (id) => {
+    const raw = g(id);
+    if (raw === "") return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  };
+  const push = (label, value) => { if (value !== null && value !== "") labels.push(label + ": " + value); };
+  push("Lượt xem tối thiểu", num("disc-min-views"));
+  push("Lượt xem tối đa", num("disc-max-views"));
+  push("Lượt thích tối thiểu", num("disc-min-likes"));
+  push("Bình luận tối thiểu", num("disc-min-comments"));
+  push("Chia sẻ tối thiểu", num("disc-min-shares"));
+  push("Thời lượng tối thiểu", num("disc-min-duration"));
+  push("Thời lượng tối đa", num("disc-max-duration"));
+  push("Đăng trong N ngày", num("disc-days"));
+  push("Bắt buộc (ALL)", g("disc-must"));
+  push("Ít nhất một (ANY)", g("disc-must-any"));
+  push("Chủ đề con ưu tiên", g("disc-subtopics"));
+  push("Loại trừ", g("disc-exclude"));
+  if (g("disc-preset") === "strict") labels.push("Preset nghiêm ngặt (5000 views · 30–60s · ≤30 ngày)");
+  return labels;
+}
+
+function renderP1ActiveFilters() {
+  const box = el("filter-active-summary");
+  if (!box) return;
+  const labels = p1ActiveFilterLabels();
+  if (!labels.length) {
+    box.hidden = true;
+    box.textContent = "";
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = "<strong>Đang áp dụng:</strong> " +
+    labels.map((x) => '<span class="filter-chip">' + esc(x) + "</span>").join(" ");
+}
+
+/* The logical run states of a search. They are never reduced to a single
+   "success" when the run actually found nothing. A historical run with the
+   old "COMPLETED" status is mapped onto the closest logical state, so an
+   old run is never shown as a false success. */
+const P1_RUN_LABELS = {
+  COMPLETED_WITH_RESULTS: ["Hoàn tất — có kết quả", "tag-ok"],
+  COMPLETED_EMPTY: ["Hoàn tất — không có kết quả", "tag-warn"],
+  PARTIAL: ["Hoàn tất một phần", "tag-warn"],
+  SOURCE_FAILED: ["Nguồn thất bại", "tag-warn"],
+  SOURCE_BLOCKED: ["Nguồn bị chặn", "tag-warn"],
+  CANCELLED: ["Đã dừng", "tag-warn"],
+  RUNNING: ["Đang tìm kiếm", "tag-accent"],
+  // The historical status of a run that was stored before the logical
+  // statuses existed. It is resolved from the stored data, never assumed.
+  COMPLETED: ["Hoàn tất (lịch sử cũ)", "tag-warn"],
+};
+
+/* Resolve the logical status of a stored run. The new statuses are used as
+   they are. A legacy "COMPLETED" run is resolved from the data it really
+   holds, so an old empty run is never shown as a success. */
+function resolveP1RunStatus(run, funnel, videos) {
+  const raw = String((run && run.status) || "").trim();
+  if (raw && raw !== "COMPLETED") return raw;
+  const count = Array.isArray(videos) ? videos.length : 0;
+  if (count > 0) return "COMPLETED_WITH_RESULTS";
+  const rawCount = Number((funnel || {}).raw ?? (funnel || {}).RAW_RETURNED ?? 0) || 0;
+  if (rawCount > 0) {
+    // The run collected videos but none of them qualified. That is an
+    // empty result with a known reason, not a success.
+    return "COMPLETED_EMPTY";
+  }
+  return "COMPLETED_EMPTY";
+}
+
+function setP1RunStatus(status, reason) {
+  const tagEl = el("p1-search-state");
+  if (!tagEl) return;
+  const entry = P1_RUN_LABELS[status] || [t("p1.search.idle"), ""];
+  tagEl.textContent = entry[0];
+  tagEl.className = "tag " + entry[1];
+  if (reason) tagEl.title = reason;
 }
 
 async function p1Search() {
-  if (!p1state.projectId) { toast("Chọn project trước.", "err"); return; }
-  const topic = (el("disc-topic").value || "").trim() || (el("p1-new-topic").value || "").trim();
+  if (!p1state.projectId) { toast("Chọn dự án trước.", "err"); return; }
+  // The search topic comes from the selected project, or from an explicit
+  // edit in the project search configuration. It never falls back to the
+  // new-project input of another workspace.
+  const project = (p1state.projects || []).find((p) => p.id === p1state.projectId) || {};
+  const configured = (el("disc-topic") && el("disc-topic").value) || "";
+  const topic = (configured.trim() || String(project.topic || "")).trim();
+  if (!topic) { toast("Chưa có chủ đề cho dự án này.", "err"); return; }
+  // The search only runs when the user presses the button. It never starts
+  // by itself when a project is opened.
+  const button = el("btn-p1-search");
+  if (button) button.disabled = true;
+  setProjectSearchState("running");
+  const forProject = p1state.projectId;
+  // One idempotency key per click. A double click is blocked by the
+  // disabled button, and the key makes a retry safe.
+  const retryKey = "ui-" + forProject + "-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
   try {
-    toast("Đang tìm kiếm (LIVE TikTok)…", "");
-    const res = await api("/p1/search", { method: "POST", body: JSON.stringify({ project_id: p1state.projectId, topic, filters: p1Filters(), retry_key: "ui-" + Date.now() }) });
-    state.top5 = res.top5 || [];
-    state.funnel = res.funnel || null;
-    state.topicQueries = res.queries || [];
-    renderTop5();
-    toast("Đã lưu version " + ((res.run && res.run.version) || "") + ".", "ok");
+    toast("Đang lập kế hoạch và thu thập (LIVE TikTok)…", "");
+    const res = await api("/p1/search", {
+      method: "POST",
+      body: JSON.stringify({
+        project_id: forProject,
+        topic,
+        filters: p1Filters(),
+        retry_key: retryKey,
+      }),
+    });
+    // The project may have changed while the search was running.
+    if (forProject !== p1state.projectId) return;
+    const run = res.run || {};
+    const status = res.status || run.status || "COMPLETED_WITH_RESULTS";
+    const reason = res.status_reason || "";
+    setP1RunStatus(status, reason);
     await loadP1Runs();
-  } catch (e) { toast(e.message, "err"); }
+    await loadProjectRunResult();
+    await loadP2Videos({ videos: p1runstate.videos || [] });
+    if (status === "COMPLETED_WITH_RESULTS") {
+      toast("Đã lưu version " + (run.version || "") + " — " +
+        ((p1runstate.videos || []).length) + " video.", "ok");
+    } else {
+      // An empty, partial or blocked run is never reported as a success.
+      toast((P1_RUN_LABELS[status] || [status, ""])[0] + (reason ? ": " + reason : ""), "err");
+    }
+  } catch (e) {
+    setProjectSearchState("error");
+    toast(e.message, "err");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+/* The search area shows what is really happening: idle, running, done or
+   failed. It never shows a success that did not happen. */
+function setProjectSearchState(phase) {
+  const tagEl = el("p1-search-state");
+  if (!tagEl) return;
+  const map = {
+    idle: [t("p1.search.idle"), ""],
+    running: [t("p1.search.running"), "tag-accent"],
+    done: [t("p1.search.done"), "tag-ok"],
+    error: [t("p1.search.error"), "tag-warn"],
+  };
+  const entry = map[phase] || map.idle;
+  tagEl.textContent = entry[0];
+  tagEl.className = "tag " + entry[1];
 }
 
 async function p1Open() {
   if (!p1state.projectId || !p1state.runId) { toast("Chọn project và version.", "err"); return; }
+  const forProject = p1state.projectId;
+  const forRun = p1state.runId;
   try {
-    const res = await api("/p1/run?project_id=" + encodeURIComponent(p1state.projectId) + "&run_id=" + encodeURIComponent(p1state.runId));
+    const res = await api("/p1/run?project_id=" + encodeURIComponent(forProject) +
+      "&run_id=" + encodeURIComponent(forRun));
+    // The project or the version may have changed while it was loading.
+    if (forProject !== p1state.projectId || forRun !== p1state.runId) return;
     const run = res.run || {};
-    let top5 = [];
-    try { top5 = JSON.parse(run.top5_json || "[]"); } catch (_) { top5 = []; }
-    let funnel = {};
-    try { funnel = JSON.parse(run.funnel_json || "{}"); } catch (_) { funnel = {}; }
-    state.top5 = top5;
-    state.funnel = funnel;
-    renderTop5();
+    p1runstate.projectId = forProject;
+    p1runstate.runId = forRun;
+    p1runstate.queries = parseJsonField(run.queries_json, []);
+    p1runstate.filters = parseJsonField(run.filters_json, null);
+    p1runstate.funnel = parseJsonField(run.funnel_json, null);
+    p1runstate.top5 = parseJsonField(run.top5_json, []);
+    p1runstate.videos = run.videos || [];
+    p1runstate.status = resolveP1RunStatus(run, p1runstate.funnel, p1runstate.videos);
+    const snapshot = parseJsonField(run.snapshot_json, {}) || {};
+    p1runstate.plan = snapshot.plan || null;
+    p1runstate.statusReason = String(snapshot.status_reason || "");
+    p1runstate.queryOutcomes = snapshot.query_outcomes || [];
+    p1runstate.candidates = snapshot.candidates || [];
+    p1runstate.filterDecisions = snapshot.filter_decisions || [];
+    p1runstate.loaded = true;
+    renderDiscovery();
+    renderProjectEmptyState();
+    renderP1SearchPlan();
+    renderP1Funnel();
+    renderP1Diagnostics();
+    setP1RunStatus(p1runstate.status, p1runstate.statusReason);
     await loadP2Videos(run);
     toast("Đã mở " + (run.version || "") + " offline (không gọi TikTok).", "ok");
   } catch (e) { toast(e.message, "err"); }
@@ -1896,17 +3764,41 @@ async function p1Open() {
 async function loadP2Videos(run) {
   const sel = el("p2-video");
   if (!sel) return;
+  renderProjectContext();
   const vids = (run && run.videos) || [];
   if (!vids.length) { sel.innerHTML = "<option value=''>—</option>"; return; }
   sel.innerHTML = vids.map((v) =>
     "<option value='" + esc(v.id) + "'>#" + (v.rank || "-") + " · @" + esc(v.creator || "") +
-    " · " + (v.score || 0) + "đ · " + esc(v.rights || "?") + "</option>").join("");
+    " · " + (v.score || 0) + "đ · " + esc(friendlyRights(v.rights)) + "</option>").join("");
   try {
     const s = await api("/p2/settings");
     el("p2-auto").value = (s && s.auto_download_best) ? "on" : "off";
     const st = el("p2-lab-state");
-    if (st) st.textContent = (s && s.auto_download_best) ? "AUTO ON" : "AUTO OFF";
+    if (st) st.textContent = (s && s.auto_download_best) ? "Tự động tải: Bật" : "Tự động tải: Tắt";
   } catch (_) { /* ignore */ }
+}
+
+async function p2AutoToggle(changed) {
+  // One real settings request. The control shows the progress, reflects the
+  // confirmed server state, and rolls back when the request fails.
+  const sel = el("p2-auto");
+  if (!sel) return;
+  const wanted = sel.value;
+  const previous = changed === "on" ? "off" : "on";
+  sel.disabled = true;
+  try {
+    const res = await api("/p2/settings", { method: "POST", body: JSON.stringify({ enabled: wanted === "on" }) });
+    const confirmed = res && typeof res.auto_download_best !== "undefined" ? res.auto_download_best : wanted === "on";
+    sel.value = confirmed ? "on" : "off";
+    const st = el("p2-lab-state");
+    if (st) st.textContent = sel.value === "on" ? "Tự động tải: Bật" : "Tự động tải: Tắt";
+    toast(sel.value === "on" ? "Đã bật tự động tải video." : "Đã tắt tự động tải video.", "ok");
+  } catch (e) {
+    sel.value = previous;
+    toast(e.message || "Không lưu được cài đặt tự động tải.", "err");
+  } finally {
+    sel.disabled = false;
+  }
 }
 
 async function p2Detail() {
@@ -1949,12 +3841,11 @@ async function p2Analyze() {
 }
 
 async function p2Download() {
-  if (!p1state.projectId || !p1state.runId) { toast("Chọn project và run.", "err"); return; }
+  if (!p1state.projectId || !p1state.runId) { toast("Chọn dự án và phiên bản.", "err"); return; }
   try {
-    const on = el("p2-auto").value === "on";
-    await api("/p2/settings", { method: "POST", body: JSON.stringify({ enabled: on }) });
-    const st = el("p2-lab-state");
-    if (st) st.textContent = on ? "AUTO ON" : "AUTO OFF";
+    // The auto-download toggle owns its own settings request. This button
+    // only performs the download action, so flipping the switch never
+    // downloads anything by accident.
     toast("Đang chọn video đủ quyền điểm cao nhất (chỉ 1)…", "");
     const res = await api("/p2/auto-download", { method: "POST",
       body: JSON.stringify({ project_id: p1state.projectId, run_id: p1state.runId }) });
@@ -1979,10 +3870,15 @@ const _bindP1orig = typeof bindP1 !== "undefined" ? bindP1 : null;
 const p3state = { id: "" };
 
 async function loadP3Settings() {
+  renderProjectContext();
   try {
     const s = await api("/p3/settings");
     if (el("p3-auto")) el("p3-auto").value = s && s.auto_publish ? "on" : "off";
-    if (el("p3-state")) el("p3-state").textContent = (s && s.auto_publish) ? "AUTO PUBLISH ON" : "AUTO OFF";
+    if (el("p3-state")) {
+      const on = !!(s && s.auto_publish);
+      el("p3-state").textContent = on ? "Auto Publish: Bật" : "Auto Publish: Tắt";
+      el("p3-state").className = "tag " + (on ? "tag-ok" : "");
+    }
   } catch (_) { /* ignore */ }
   try {
     const r = await api("/p1/run?project_id=" + encodeURIComponent(p1state.projectId || "") +
@@ -1990,17 +3886,34 @@ async function loadP3Settings() {
     const vids = (r && r.run && r.run.videos) || [];
     const sel = el("p3-video");
     if (sel) sel.innerHTML = vids.map((v) =>
-      "<option value='" + esc(v.id) + "'>#" + (v.rank || "-") + " · @" + esc(v.creator || "") + " · " + esc(v.rights || "?") + "</option>").join("")
+      "<option value='" + esc(v.id) + "'>#" + (v.rank || "-") + " · @" + esc(v.creator || "") + " · " + esc(friendlyRights(v.rights)) + "</option>").join("")
       || "<option value=''>—</option>";
   } catch (_) { /* ignore */ }
   await p3Refresh();
   if (el("p3-auto") && !el("p3-auto").dataset.bound) {
     el("p3-auto").dataset.bound = "1";
     el("p3-auto").addEventListener("change", async (e) => {
+      const sel = e.target;
+      const wanted = sel.value;
+      const previous = wanted === "on" ? "off" : "on";
+      if (wanted === "on") {
+        const ok = window.confirm(
+          "Bật tự động xuất bản?\n\n" +
+          "Các bài đã được duyệt và đến giờ sẽ có thể được đăng tự động. " +
+          "Bài chưa duyệt vẫn không được đăng."
+        );
+        if (!ok) { sel.value = previous; return; }
+      }
+      sel.disabled = true;
       try {
-        await api("/p3/settings", { method: "POST", body: JSON.stringify({ enabled: e.target.value === "on" }) });
-        toast(e.target.value === "on" ? "Đã bật Auto Publish." : "Đã tắt Auto Publish.", "ok");
-      } catch (err) { toast(err.message, "err"); }
+        await api("/p3/settings", { method: "POST", body: JSON.stringify({ enabled: wanted === "on" }) });
+        toast(wanted === "on" ? "Đã bật tự động xuất bản." : "Đã tắt tự động xuất bản.", "ok");
+      } catch (err) {
+        sel.value = previous;
+        toast(err.message || "Không lưu được cài đặt tự động xuất bản.", "err");
+      } finally {
+        sel.disabled = false;
+      }
       await loadP3Settings();
     });
   }
@@ -2009,25 +3922,82 @@ async function loadP3Settings() {
 async function p3Refresh() {
   try {
     const res = await api("/p3/publications");
-    const pubs = res.publications || [];
+    let pubs = res.publications || [];
+    // The publishing workspace follows the selected project so publications
+    // from another project never leak into the current view.
+    if (p1state.projectId) {
+      pubs = pubs.filter((p) => String(p.project_id || "") === String(p1state.projectId));
+    }
     const box = el("p3-list");
     if (!box) return;
-    if (!pubs.length) { box.innerHTML = "<div class='empty'>Chưa có publication.</div>"; return; }
+    if (!pubs.length) {
+      box.innerHTML = "<div class='empty'>Chưa có publication. Chọn video và bấm “Tạo publication”.</div>";
+      renderP3Side(null);
+      return;
+    }
     box.innerHTML = pubs.map((p) => "<div class='notif' data-pid='" + esc(p.id) + "'>" +
-      "<div class='notif-kind'>" + esc(p.id) + " · " + esc(p.status) + "</div>" +
+      "<div class='notif-kind'>" + esc(p.id) + " · " + esc(friendlyPubStatus(p.status)) + "</div>" +
       "<div class='notif-msg'>media: " + esc(p.media_path || "(chưa tải)") + " · đích: @" + esc(p.account || "—") +
-      " · lịch: " + esc(p.scheduled_at || "ngay") + (p.posted_url ? " · <a href='" + esc(p.posted_url) + "' target='_blank' rel='noreferrer' style='color:var(--burgundy-ink)'>xem bài đăng</a>" : "") +
+      " · lịch: " + esc(friendlySchedule(p.scheduled_at)) + (p.posted_url ? " · <a href='" + esc(p.posted_url) + "' target='_blank' rel='noreferrer' style='color:var(--burgundy-ink)'>xem bài đăng</a>" : "") +
       (p.error ? " · lỗi: " + esc(p.error) : "") + "</div>" +
       "<div class='row'><button class='btn' data-act='pick'>Chọn</button></div></div>").join("");
     box.querySelectorAll("[data-act='pick']").forEach((b) => b.addEventListener("click", () => {
       const pid = b.closest("[data-pid]").dataset.pid;
-      p3state.id = pid;
-      const p = pubs.find((x) => x.id === pid) || {};
-      if (el("p3-caption")) el("p3-caption").value = p.caption || "";
-      if (el("p3-tags")) el("p3-tags").value = (p.hashtags || []).join("\n");
-      toast("Đã chọn " + pid + " (" + (p.status || "") + ").", "ok");
+      selectP3Publication(pid, pubs);
     }));
+    const current = pubs.find((x) => x.id === p3state.id) || pubs[0];
+    if (current) selectP3Publication(current.id, pubs, true);
   } catch (_) { /* ignore */ }
+}
+
+function selectP3Publication(pid, pubs, silent) {
+  p3state.id = pid;
+  const list = Array.isArray(pubs) ? pubs : [];
+  const p = list.find((x) => x.id === pid) || {};
+  if (el("p3-caption")) el("p3-caption").value = p.caption || "";
+  if (el("p3-tags")) el("p3-tags").value = (p.hashtags || []).join("\n");
+  if (el("p3-account") && p.account) el("p3-account").value = p.account;
+  if (el("p3-schedule")) el("p3-schedule").value = toLocalInput(p.scheduled_at || "");
+  renderP3Side(p);
+  if (!silent) toast("Đã chọn " + pid + " (" + friendlyPubStatus(p.status) + ").", "ok");
+}
+
+function renderP3Side(p) {
+  const set = (id, text) => { const n = el(id); if (n) n.textContent = text; };
+  if (!p || !p.id) {
+    set("p3-side-id", "—");
+    set("p3-side-status", "—");
+    set("p3-side-rights", "—");
+    set("p3-side-account", "—");
+    set("p3-side-caption", "—");
+    set("p3-side-approval", "—");
+    set("p3-side-schedule", "—");
+    if (el("p3-side-link")) el("p3-side-link").innerHTML = "";
+    if (el("p3-side-next")) el("p3-side-next").textContent = "Tạo hoặc chọn một publication để bắt đầu.";
+    return;
+  }
+  set("p3-side-id", p.id || "—");
+  set("p3-side-status", friendlyPubStatus(p.status));
+  set("p3-side-rights", p.rights ? friendlyRights(p.rights) : (p.media_path ? "Đã có file" : "—"));
+  set("p3-side-account", p.account ? "@" + p.account : "—");
+  set("p3-side-caption", p.caption ? (String(p.caption).slice(0, 80) + (String(p.caption).length > 80 ? "…" : "")) : "Chưa có caption");
+  const st = String(p.status || "").toUpperCase();
+  set("p3-side-approval", (st === "APPROVED" || st === "SCHEDULED" || st === "PUBLISHED") ? "Đã duyệt" : "Chưa duyệt");
+  set("p3-side-schedule", friendlySchedule(p.scheduled_at));
+  if (el("p3-side-link")) {
+    el("p3-side-link").innerHTML = p.posted_url
+      ? "<a href='" + esc(p.posted_url) + "' target='_blank' rel='noreferrer' style='color:var(--burgundy-ink)'>Mở bài đã đăng</a>"
+      : "";
+  }
+  if (el("p3-side-next")) {
+    let next = "Soạn caption, sau đó bấm “Duyệt bài”.";
+    if (st === "PUBLISHED" && p.posted_url) next = "Bài đã đăng. Không cần thao tác thêm.";
+    else if (st === "PUBLISH_UNKNOWN") next = "Chưa xác minh đăng bài. Kiểm tra TikTok Studio trước khi xử lý tiếp.";
+    else if (st === "SCHEDULED") next = "Bài đã lên lịch. Chờ đến giờ chạy hoặc bấm “Chạy Auto Publish”.";
+    else if (st === "APPROVED") next = "Bài đã duyệt. Đặt lịch đăng ở mục 03.";
+    else if (!p.caption) next = "Tạo caption mẫu, chỉnh sửa rồi bấm “Lưu caption”.";
+    el("p3-side-next").textContent = next;
+  }
 }
 
 function _p3vid() {
@@ -2078,9 +4048,10 @@ async function p3Approve() {
 async function p3Schedule() {
   if (!p3state.id) { toast("Tạo/chọn publication trước.", "err"); return; }
   try {
+    const local = (el("p3-schedule") && el("p3-schedule").value) || "";
     await api("/p3/schedule", { method: "POST", body: JSON.stringify({
       publication_id: p3state.id,
-      scheduled_at: (el("p3-schedule") && el("p3-schedule").value) || "",
+      scheduled_at: fromLocalInput(local),
       account: (el("p3-account") && el("p3-account").value) || "" }) });
     toast("Đã đặt lịch.", "ok");
   } catch (e) { toast(e.message, "err"); }

@@ -20,7 +20,23 @@ from urllib.parse import parse_qs, urlparse
 
 import dashboard_service as service
 
-WEB_ROOT = Path(__file__).with_name("web")
+
+def _bundle_root() -> Path:
+    """Bundle dir for frozen exe, source dir otherwise."""
+    try:
+        import sys as _sys
+
+        if getattr(_sys, "frozen", False):
+            meipass = getattr(_sys, "_MEIPASS", "")
+            if meipass:
+                return Path(meipass)
+            return Path(_sys.executable).resolve().parent / "_internal"
+    except Exception:
+        pass
+    return Path(__file__).resolve().parent
+
+
+WEB_ROOT = _bundle_root() / "web"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8777
 
@@ -44,9 +60,12 @@ def _route(method: str, path: str) -> Callable[..., Any] | None:
         ("GET", "/api/discovery/detail"): service.discovery_detail,
         ("POST", "/api/discovery/reanalyze"): service.reanalyze_with_media,
         ("GET", "/api/p1/projects"): service.p1_projects_list,
+        ("GET", "/api/p1/projects/summary"): service.p1_project_summary,
+        ("GET", "/api/p1/project"): service.p1_project_detail,
         ("POST", "/api/p1/projects"): service.p1_project_create,
         ("GET", "/api/p1/runs"): service.p1_runs_list,
         ("GET", "/api/p1/run"): service.p1_run_get,
+        ("GET", "/api/p1/plan"): service.p1_plan_preview,
         ("POST", "/api/p1/search"): service.p1_search,
         ("GET", "/api/p2/video"): service.p2_video_detail,
         ("POST", "/api/p2/video/analyze"): service.p2_video_analyze,

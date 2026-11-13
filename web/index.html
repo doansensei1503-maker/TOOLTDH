@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TOOLTDH Pro — TikTok Content Workspace</title>
-<link rel="stylesheet" href="/styles.css?v=20261113-1">
+<meta name="theme-color" content="#EDEEEB">
+<link rel="stylesheet" href="/styles.css?v=20261113-4">
 </head>
 <body>
 <div class="app">
@@ -21,22 +22,21 @@
 
     <nav class="nav" id="nav" aria-label="Điều hướng chính">
       <p class="nav-group">Workspace</p>
-      <button class="nav-item active" data-view="overview"><span class="nav-ico">◱</span>Tổng quan</button>
-      <button class="nav-item" data-view="discovery"><span class="nav-ico">⌕</span>Dự án</button>
-      <button class="nav-item" data-view="videos"><span class="nav-ico">▶</span>Video Lab</button>
-      <button class="nav-item" data-view="videoslib"><span class="nav-ico">▤</span>Thư viện</button>
-      <button class="nav-item" data-view="scheduler"><span class="nav-ico">◷</span>Xuất bản</button>
+      <button class="nav-item active" data-view="overview"><span class="nav-ico">◱</span><span class="nav-item-label">Tổng quan</span></button>
+      <button class="nav-item" data-view="discovery"><span class="nav-ico">⌕</span><span class="nav-item-label">Dự án</span></button>
+      <button class="nav-item" data-view="videos"><span class="nav-ico">▶</span><span class="nav-item-label">Video Lab</span></button>
+      <button class="nav-item" data-view="videoslib"><span class="nav-ico">▤</span><span class="nav-item-label">Thư viện</span></button>
+      <button class="nav-item" data-view="scheduler"><span class="nav-ico">◷</span><span class="nav-item-label">Xuất bản</span></button>
 
-      <p class="nav-group">Nâng cao</p>
-      <button class="nav-item" data-view="assistant"><span class="nav-item-label">AI Assistant</span></button>
-      <button class="nav-item" data-view="trends"><span class="nav-item-label">Trend Analyzer</span></button>
-      <button class="nav-item" data-view="filter"><span class="nav-item-label">Video Filter</span></button>
-      <button class="nav-item" data-view="caption"><span class="nav-item-label">Caption &amp; Hashtag</span></button>
-      <button class="nav-item" data-view="editor"><span class="nav-item-label">Video Editor</span></button>
-      <button class="nav-item" data-view="approval"><span class="nav-item-label">Approval Center<span class="badge" id="badge-approval" hidden>0</span></span></button>
-      <button class="nav-item" data-view="studio"><span class="nav-item-label">TikTok Studio</span></button>
-      <button class="nav-item" data-view="analytics"><span class="nav-item-label">Analytics</span></button>
-      <button class="nav-item" data-view="history"><span class="nav-item-label">History &amp; Logs</span></button>
+      <p class="nav-group nav-toggle" id="nav-advanced-toggle" role="button" tabindex="0" aria-expanded="true" title="Thu gọn/mở rộng">Nâng cao ▾</p>
+      <button class="nav-item nav-item-adv" data-view="trends"><span class="nav-item-label">Trend Analyzer</span></button>
+      <button class="nav-item nav-item-adv" data-view="filter"><span class="nav-item-label">Video Filter</span></button>
+      <button class="nav-item nav-item-adv" data-view="caption"><span class="nav-item-label">Caption &amp; Hashtag</span></button>
+      <button class="nav-item nav-item-adv" data-view="editor"><span class="nav-item-label">Video Editor</span></button>
+      <button class="nav-item nav-item-adv" data-view="approval"><span class="nav-item-label">Approval Center<span class="badge" id="badge-approval" hidden>0</span></span></button>
+      <button class="nav-item nav-item-adv" data-view="studio"><span class="nav-item-label">TikTok Studio</span></button>
+      <button class="nav-item nav-item-adv" data-view="analytics"><span class="nav-item-label">Analytics</span></button>
+      <button class="nav-item nav-item-adv" data-view="history"><span class="nav-item-label">History &amp; Logs</span></button>
     </nav>
 
     <div class="sidebar-foot">
@@ -57,15 +57,38 @@
         <p id="view-sub" class="sub">Trạng thái thật của hệ thống.</p>
       </div>
       <div class="topbar-right">
-        <div class="pill" id="stop-pill" hidden>
-          <span class="dot danger"></span>Emergency stop active
-          <button class="btn btn-sm" id="btn-emergency-start">Resume</button>
+        <div class="control-wrap">
+          <button class="btn btn-sm" id="btn-automation" aria-haspopup="true" aria-expanded="false">
+            <span class="status-dot" id="automation-dot"></span>
+            <span id="automation-label">Đang tải…</span>
+            <span class="caret">▾</span>
+          </button>
+          <div class="menu" id="automation-menu" hidden>
+            <div class="menu-state">
+              <span class="menu-state-label" id="automation-state-label">—</span>
+              <span class="menu-state-detail" id="automation-state-detail"></span>
+            </div>
+            <button class="menu-item" id="menu-automation-toggle"></button>
+            <button class="menu-item menu-item-danger" id="menu-automation-emergency" hidden></button>
+            <button class="menu-item" id="menu-automation-scheduler"></button>
+            <div class="menu-sep"></div>
+            <button class="menu-item" id="menu-automation-refresh">Làm mới dữ liệu</button>
+          </div>
         </div>
-        <button class="icon-btn" id="btn-notifications" title="Thông báo">
-          ◔<span class="badge" id="badge-notif" hidden>0</span>
-        </button>
-        <button class="btn btn-ghost" id="btn-refresh">Làm mới</button>
-        <button class="btn btn-danger" id="btn-emergency">Dừng khẩn cấp</button>
+        <div class="control-wrap">
+          <button class="icon-btn" id="btn-notifications" title="Thông báo" aria-haspopup="true" aria-expanded="false">
+            ◔<span class="badge" id="badge-notif" hidden>0</span>
+          </button>
+          <div class="menu menu-notif" id="notif-menu" hidden>
+            <div class="menu-head">
+              <strong id="notif-menu-title">Thông báo</strong>
+              <button class="icon-btn icon-btn-sm" id="btn-notif-menu-close" title="Đóng">✕</button>
+            </div>
+            <div id="notif-menu-list" class="menu-list"></div>
+            <button class="menu-foot" id="btn-notif-open-all">Xem tất cả</button>
+          </div>
+        </div>
+        <button class="icon-btn" id="btn-top-settings" title="Cài đặt">⚙</button>
       </div>
     </header>
 
@@ -76,26 +99,32 @@
         <div class="stat-strip" id="ov-stats"></div>
 
         <div class="grid-2">
-          <div class="card">
+          <div class="card card-flush">
             <div class="card-head">
-              <h3>Blockers đang chặn</h3>
+              <h3 data-i18n="overview.blockers">Vấn đề cần xử lý</h3>
               <span class="tag tag-warn" id="ov-blocker-count">0</span>
             </div>
             <div id="ov-blockers" class="stack"></div>
+            <div class="card-foot">
+              <button class="btn btn-ghost btn-sm" id="btn-ov-all-issues" data-i18n="overview.viewAll">Xem tất cả</button>
+            </div>
           </div>
 
-          <div class="card">
+          <div class="card card-flush">
             <div class="card-head">
-              <h3>Lịch chạy tiếp theo</h3>
+              <h3 data-i18n="overview.auto">Tự động hóa</h3>
               <span class="tag" id="ov-sched-state">—</span>
             </div>
             <div id="ov-schedule" class="stack"></div>
           </div>
         </div>
 
-        <div class="card">
-          <div class="card-head"><h3>Tác vụ gần đây</h3></div>
-          <div class="table-wrap"><table class="table" id="ov-tasks"></table></div>
+        <div class="card card-flush">
+          <div class="card-head">
+            <h3 data-i18n="overview.activity">Hoạt động gần đây</h3>
+            <button class="btn btn-ghost btn-sm" id="btn-ov-all-history">Xem toàn bộ lịch sử</button>
+          </div>
+          <div id="ov-activity" class="stack"></div>
         </div>
       </div>
 
@@ -104,166 +133,317 @@
         <div class="card card-head-panel">
           <div class="panel-head">
             <div>
-              <h2 class="panel-title" id="p1-project-name">Project</h2>
-              <p class="panel-meta" id="p1-project-meta">Chưa chọn project.</p>
+              <h2 class="panel-title">Dự án của bạn</h2>
+              <p class="panel-meta">Mỗi dự án giữ riêng chủ đề, phiên bản, video và lịch sử xuất bản.</p>
             </div>
             <div class="panel-actions">
-              <button class="btn btn-primary" id="btn-p1-search">Tìm kiếm mới</button>
-              <button class="btn" id="btn-p1-open">Mở version (offline)</button>
-              <button class="btn btn-ghost" id="btn-p1-create">Project mới</button>
+              <button class="btn btn-primary" id="btn-project-create">Tạo dự án</button>
             </div>
           </div>
-          <div class="form-grid form-grid-3">
-            <label>Project
-              <select id="p1-project" class="select-inline"></select>
-            </label>
-            <label>Version (run)
-              <select id="p1-run" class="select-inline"></select>
-            </label>
-            <label>Chủ đề project mới
-              <input id="p1-new-topic" type="text" placeholder="Naruto">
-            </label>
-          </div>
-        </div>
-
-        <div class="tabs" role="tablist" aria-label="Kết quả project">
-          <button class="tab active" data-tab="results" role="tab">Kết quả</button>
-          <button class="tab" data-tab="versions" role="tab">Phiên bản</button>
-          <button class="tab" data-tab="config" role="tab">Cấu hình</button>
-        </div>
-
-        <div class="tab-panel active" data-panel="results">
-          <div class="info-strip" id="disc-search-stats"></div>
-          <div class="card card-flush">
-            <div class="card-head">
-              <h3>TOP 5 video đề xuất</h3>
-              <span class="tag tag-accent" id="disc-top5-count">0 đề xuất</span>
+          <div class="project-toolbar">
+            <div class="field field-inline">
+              <label class="field-label" for="project-search">Tìm dự án</label>
+              <input id="project-search" class="field-input" type="text" placeholder="Tìm dự án theo tên hoặc chủ đề" autocomplete="off">
             </div>
-            <div id="disc-top5" class="stack"></div>
-          </div>
-          <div class="card card-flush">
-            <div class="card-head">
-              <h3>Kết quả tìm kiếm</h3>
-              <span class="tag" id="disc-count">0 ứng viên</span>
+            <div class="field field-inline">
+              <label class="field-label" for="project-filter">Trạng thái</label>
+              <select id="project-filter" class="field-input">
+                <option value="all">Tất cả</option>
+                <option value="active">Đang hoạt động</option>
+                <option value="pending">Chờ duyệt</option>
+                <option value="issues">Có vấn đề</option>
+              </select>
             </div>
-            <div id="disc-blockers" class="stack"></div>
-            <div class="table-wrap"><table class="table" id="disc-table"></table></div>
-          </div>
-        </div>
-
-        <div class="tab-panel" data-panel="versions">
-          <div class="card card-flush">
-            <div class="card-head"><h3>Phiên bản đã lưu</h3></div>
-            <div class="table-wrap"><table class="table" id="p1-runs-table"></table></div>
-          </div>
-        </div>
-
-        <div class="tab-panel" data-panel="config">
-          <div class="card">
-            <div class="card-head">
-              <h3>Cấu hình tìm kiếm</h3>
-              <span class="tag tag-accent" id="disc-status">IDLE</span>
-            </div>
-            <div class="form-grid">
-              <label>Chủ đề / từ khóa
-                <input id="disc-topic" type="text" placeholder="AI Music">
-              </label>
-              <label>Ngôn ngữ
-                <select id="disc-language"><option value="">—</option><option>English</option><option>Vietnamese</option><option>Japanese</option><option>Korean</option></select>
-              </label>
-              <label>Thị trường
-                <input id="disc-market" type="text" placeholder="US">
-              </label>
-              <label>Đăng trong N ngày
-                <input id="disc-days" type="number" min="1" max="365" placeholder="7">
-              </label>
-              <label>Lượt xem tối thiểu
-                <input id="disc-min-views" type="number" min="0" placeholder="100000">
-              </label>
-              <label>Lượt xem tối đa
-                <input id="disc-max-views" type="number" min="0" placeholder="">
-              </label>
-              <label>Lượt thích tối thiểu
-                <input id="disc-min-likes" type="number" min="0" placeholder="0">
-              </label>
-              <label>Bình luận tối thiểu
-                <input id="disc-min-comments" type="number" min="0" placeholder="0">
-              </label>
-              <label>Chia sẻ tối thiểu
-                <input id="disc-min-shares" type="number" min="0" placeholder="0">
-              </label>
-              <label>Thời lượng tối đa (giây)
-                <input id="disc-max-duration" type="number" min="0" placeholder="600">
-              </label>
-              <label>Thời lượng tối thiểu (giây)
-                <input id="disc-min-duration" type="number" min="0" placeholder="0">
-              </label>
-              <label class="span-2">Từ khóa bắt buộc (ALL)
-                <input id="disc-must" type="text" placeholder="ai cover, ai remix">
-              </label>
-              <label class="span-2">Từ khóa chỉ cần một (ANY)
-                <input id="disc-must-any" type="text" placeholder="suno, udio">
-              </label>
-              <label class="span-2">Chủ đề con ưu tiên
-                <input id="disc-subtopics" type="text" placeholder="cover, remix">
-              </label>
-              <label class="span-2">Từ khóa loại trừ
-                <input id="disc-exclude" type="text" placeholder="spam, scam">
-              </label>
-            </div>
-            <div class="row">
-              <button class="btn btn-primary" id="btn-discover">Tìm kiếm</button>
-              <button class="btn" id="btn-discover-again" disabled>Tìm kiếm lại</button>
-              <button class="btn" id="btn-discover-resume">Phân tích lại (không tìm kiếm lại)</button>
-              <button class="btn btn-danger" id="btn-discover-stop" disabled>Dừng tìm kiếm</button>
-              <button class="btn" id="btn-save-profile">Lưu cấu hình</button>
-              <select id="disc-profiles" class="select-inline"><option value="">— cấu hình đã lưu —</option></select>
+            <div class="field field-inline">
+              <label class="field-label" for="project-sort">Sắp xếp</label>
+              <select id="project-sort" class="field-input">
+                <option value="updated">Cập nhật gần nhất</option>
+                <option value="name">Tên A–Z</option>
+                <option value="created">Ngày tạo</option>
+              </select>
             </div>
           </div>
         </div>
 
-        <div class="card card-head-panel" id="disc-selected-card" hidden>
+        <div class="card card-flush">
           <div class="card-head">
-            <h3>Video được chọn</h3>
-            <span class="tag tag-ok" id="disc-selected-score">—</span>
+            <h3>Danh sách dự án</h3>
+            <span class="tag" id="project-count">0</span>
           </div>
-          <div id="disc-selected"></div>
-          <div class="row">
-            <button class="btn btn-primary" id="btn-approve-selected">Duyệt video</button>
-            <button class="btn btn-danger" id="btn-reject-selected">Từ chối</button>
+          <div id="project-list" class="project-list">
+            <div class="empty">Chưa có dự án. Bấm “Tạo dự án” để bắt đầu.</div>
           </div>
         </div>
 
-        <div class="card card-head-panel">
-          <div class="card-head">
-            <h3>Phân tích AI các ứng viên</h3>
-            <span class="tag" id="disc-analysis-count">0</span>
+        <div class="project-detail" id="project-detail" hidden>
+          <div class="card card-head-panel">
+            <div class="panel-head">
+              <div>
+                <h2 class="panel-title" id="p1-project-name">Dự án</h2>
+                <p class="panel-meta" id="p1-project-meta">Chưa chọn dự án.</p>
+              </div>
+              <div class="panel-actions">
+                <span class="tag" id="p1-search-state" data-i18n="p1.search.idle">Chưa tìm kiếm</span>
+                <button class="btn btn-primary" id="btn-p1-search" data-i18n="p1.search.start">Bắt đầu tìm kiếm</button>
+                <button class="btn" id="btn-p1-open">Mở phiên bản</button>
+                <button class="btn btn-ghost" id="btn-project-back">Về danh sách</button>
+              </div>
+            </div>
+            <div class="form-grid form-grid-3">
+              <div class="field">
+                <label class="field-label" for="p1-run">Phiên bản</label>
+                <select id="p1-run" class="field-input"></select>
+              </div>
+              <div class="field">
+                <label class="field-label" for="p1-project-topic">Chủ đề tìm kiếm</label>
+                <input id="p1-project-topic" class="field-input" type="text" autocomplete="off">
+                <p class="field-helper">Chủ đề của dự án này. Sửa ở đây không đổi chủ đề đã lưu.</p>
+              </div>
+              <div class="field">
+                <label class="field-label" for="p1-topic-display" data-i18n="p1.search.topic">Chủ đề dùng để tìm</label>
+                <p class="topic-display" id="p1-topic-display">—</p>
+                <p class="field-helper">Chủ đề này được gửi khi bạn bấm “Bắt đầu tìm kiếm”.</p>
+              </div>
+            </div>
+            <div class="row filter-toggle-row">
+              <button class="btn btn-ghost btn-sm" id="btn-toggle-filters" aria-expanded="false" aria-controls="project-filters">
+                <span class="caret">▾</span> <span data-i18n="p1.search.filters">Thiết lập bộ lọc</span>
+              </button>
+            </div>
+            <div class="project-filters" id="project-filters" hidden>
+              <p class="field-helper" id="filter-helper-note">
+                Mọi ô trống = không giới hạn. Không có ngưỡng mặc định nào được áp dụng.
+              </p>
+              <div class="form-grid">
+                <label>Chủ đề / từ khóa
+                  <input id="disc-topic" type="text" placeholder="Ví dụ: mẹo quay video đẹp bằng điện thoại" autocomplete="off">
+                </label>
+                <label>Đăng trong N ngày
+                  <input id="disc-days" type="number" min="1" max="365" placeholder="Không giới hạn">
+                </label>
+                <label>Lượt xem tối thiểu
+                  <input id="disc-min-views" type="number" min="0" placeholder="Không giới hạn">
+                </label>
+                <label>Lượt xem tối đa
+                  <input id="disc-max-views" type="number" min="0" placeholder="Không giới hạn">
+                </label>
+                <label>Lượt thích tối thiểu
+                  <input id="disc-min-likes" type="number" min="0" placeholder="Không giới hạn">
+                </label>
+                <label>Bình luận tối thiểu
+                  <input id="disc-min-comments" type="number" min="0" placeholder="Không giới hạn">
+                </label>
+                <label>Chia sẻ tối thiểu
+                  <input id="disc-min-shares" type="number" min="0" placeholder="Không giới hạn">
+                </label>
+                <label>Thời lượng tối đa (giây)
+                  <input id="disc-max-duration" type="number" min="0" placeholder="Không giới hạn">
+                </label>
+                <label>Thời lượng tối thiểu (giây)
+                  <input id="disc-min-duration" type="number" min="0" placeholder="Không giới hạn">
+                </label>
+                <label class="span-2">Từ khóa bắt buộc (ALL)
+                  <input id="disc-must" type="text" placeholder="Không giới hạn — ví dụ: bánh, bơ" autocomplete="off">
+                </label>
+                <label class="span-2">Từ khóa chỉ cần một (ANY)
+                  <input id="disc-must-any" type="text" placeholder="Không giới hạn — ví dụ: nướng, chiên" autocomplete="off">
+                </label>
+                <label class="span-2">Chủ đề con ưu tiên
+                  <input id="disc-subtopics" type="text" placeholder="Không bắt buộc — ví dụ: bánh kem, bánh mì" autocomplete="off">
+                </label>
+                <label class="span-2">Từ khóa loại trừ
+                  <input id="disc-exclude" type="text" placeholder="Không bắt buộc — ví dụ: quảng cáo" autocomplete="off">
+                </label>
+                <label class="span-2">Preset bộ lọc (tùy chọn)
+                  <select id="disc-preset">
+                    <option value="">Không dùng preset — không giới hạn</option>
+                    <option value="strict">Preset nghiêm ngặt (5000 views · 30–60s · ≤30 ngày) — tắt mặc định</option>
+                  </select>
+                  <p class="field-helper">
+                    Preset nghiêm ngặt là chế độ tương thích cũ, mặc định TẮT. Bật nó sẽ áp các ngưỡng cố định nêu trên.
+                  </p>
+                </label>
+                <details class="span-2 advanced-unsupported">
+                  <summary>Cài đặt nâng cao (chưa được nguồn hỗ trợ)</summary>
+                  <div class="form-grid">
+                    <label>Ngôn ngữ (chưa xác minh được)
+                      <input id="disc-language" type="text" placeholder="Không dùng — nguồn không có trường xác minh" autocomplete="off">
+                    </label>
+                    <label>Thị trường (chưa xác minh được)
+                      <input id="disc-market" type="text" placeholder="Không dùng — nguồn không có trường xác minh" autocomplete="off">
+                    </label>
+                  </div>
+                  <p class="field-helper">
+                    Nguồn TikTok hiện tại không trả về trường ngôn ngữ/thị trường đáng tin cậy.
+                    Giá trị ở đây chỉ được ghi nhận, KHÔNG được dùng để lọc và KHÔNG được báo là đã lọc thành công.
+                  </p>
+                </details>
+              </div>
+              <div class="filter-active-summary" id="filter-active-summary" hidden></div>
+              <p class="field-helper">Bộ lọc chỉ dùng cho lượt tìm kiếm tiếp theo. Chủ đề đã lưu của dự án không bị thay đổi.</p>
+              <div class="row">
+                <button class="btn btn-primary" id="btn-discover" data-i18n="p1.search.start">Bắt đầu tìm kiếm</button>
+                <button class="btn" id="btn-discover-again" disabled>Tìm kiếm lại</button>
+                <button class="btn" id="btn-discover-resume">Phân tích lại (không tìm kiếm lại)</button>
+                <button class="btn btn-danger" id="btn-discover-stop" disabled>Dừng tìm kiếm</button>
+                <button class="btn" id="btn-save-profile">Lưu cấu hình</button>
+                <select id="disc-profiles" class="select-inline"><option value="">— cấu hình đã lưu —</option></select>
+              </div>
+            </div>
           </div>
-          <div id="disc-analysis" class="stack"></div>
-        </div>
 
-        <div class="card card-head-panel">
-          <div class="card-head">
-            <h3>Xem trước video</h3>
-            <span class="tag" id="disc-preview-state">—</span>
+          <div class="project-empty" id="project-empty" hidden>
+            <h3 data-i18n="p1.empty.title">Chưa có kết quả nghiên cứu</h3>
+            <p class="project-empty-topic" id="project-empty-topic"></p>
+            <p class="muted" id="project-empty-note" data-i18n="p1.empty.note"></p>
+            <button class="btn btn-primary" id="btn-p1-search-empty" data-i18n="p1.search.start">Bắt đầu tìm kiếm</button>
           </div>
-          <div class="row">
-            <select id="disc-preview-select" class="select-inline"></select>
-          </div>
-          <div id="disc-preview-box">
-            <div class="empty">Chọn một video để xem trước.</div>
-            <video id="disc-preview-player" controls preload="metadata" hidden></video>
-            <img id="disc-preview-still" hidden alt="Khung hình thật đã đọc từ video" />
-          </div>
-        </div>
 
-        <div class="card card-head-panel">
-          <div class="card-head">
-            <h3>Video Lab (P2) — xem chi tiết ở trang Video Lab</h3>
-            <span class="tag" id="p2-lab-state">—</span>
+          <div class="stat-strip" id="project-summary"></div>
+
+          <div class="tabs" role="tablist" aria-label="Nội dung dự án">
+            <button class="tab active" data-tab="pOverview" data-i18n-tab="tab.overview" role="tab">Tổng quan</button>
+            <button class="tab" data-tab="results" data-i18n-tab="tab.results" role="tab">Kết quả</button>
+            <button class="tab" data-tab="versions" data-i18n-tab="tab.versions" role="tab">Phiên bản</button>
+            <button class="tab" data-tab="pPublish" data-i18n-tab="tab.publish" role="tab">Xuất bản</button>
+            <button class="tab" data-tab="pHistory" data-i18n-tab="tab.history" role="tab">Lịch sử</button>
           </div>
-          <div class="row">
-            <button class="btn" id="btn-p2-goto">Mở Video Lab</button>
+
+          <div class="tab-panel active" data-panel="pOverview">
+            <div class="card card-flush">
+              <div class="card-head">
+                <h3>Kế hoạch tìm kiếm</h3>
+                <span class="tag" id="p1-plan-count">Chưa có kế hoạch</span>
+              </div>
+              <div id="p1-search-plan" class="stack">
+                <div class="empty">Chưa có kế hoạch. Bấm “Bắt đầu tìm kiếm” để tạo kế hoạch truy vấn.</div>
+              </div>
+            </div>
+            <div class="card card-flush">
+              <div class="card-head">
+                <h3>Phễu thu thập</h3>
+                <span class="tag" id="p1-funnel-status">—</span>
+              </div>
+              <div id="p1-funnel" class="stack">
+                <div class="empty">Chưa có dữ liệu phễu.</div>
+              </div>
+            </div>
+            <details class="card card-flush" id="p1-diagnostics-wrap">
+              <summary class="card-head">Chẩn đoán chi tiết (mở rộng)</summary>
+              <div id="p1-diagnostics" class="stack">
+                <div class="empty">Chưa có chẩn đoán.</div>
+              </div>
+            </details>
+            <div class="grid-2">
+              <div class="card card-flush">
+                <div class="card-head">
+                  <h3>Hoạt động gần đây</h3>
+                </div>
+                <div id="project-activity" class="stack">
+                  <div class="empty">Chưa có hoạt động.</div>
+                </div>
+              </div>
+              <div class="card card-flush">
+                <div class="card-head">
+                  <h3>Việc cần xử lý</h3>
+                </div>
+                <div id="project-pending" class="stack">
+                  <div class="empty">Không có việc nào cần xử lý.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-panel" data-panel="results">
+            <div class="info-strip" id="disc-search-stats"></div>
+            <div class="card card-flush">
+              <div class="card-head">
+                <h3>TOP 5 video đề xuất</h3>
+                <span class="tag tag-accent" id="disc-top5-count">0 đề xuất</span>
+              </div>
+              <div id="disc-top5" class="stack"></div>
+            </div>
+            <div class="card card-flush">
+              <div class="card-head">
+                <h3>Kết quả tìm kiếm</h3>
+                <span class="tag" id="disc-count">0 ứng viên</span>
+              </div>
+              <div id="disc-blockers" class="stack"></div>
+              <div class="table-wrap"><table class="table" id="disc-table"></table></div>
+            </div>
+
+            <div class="card card-head-panel" id="disc-selected-card" hidden>
+              <div class="card-head">
+                <h3>Video được chọn</h3>
+                <span class="tag tag-ok" id="disc-selected-score">—</span>
+              </div>
+              <div id="disc-selected"></div>
+              <div class="row">
+                <button class="btn btn-primary" id="btn-approve-selected">Duyệt video</button>
+                <button class="btn btn-danger" id="btn-reject-selected">Từ chối</button>
+              </div>
+            </div>
+
+            <div class="card card-head-panel">
+              <div class="card-head">
+                <h3>Phân tích AI các ứng viên</h3>
+                <span class="tag" id="disc-analysis-count">0</span>
+              </div>
+              <div id="disc-analysis" class="stack"></div>
+            </div>
+
+            <div class="card card-head-panel">
+              <div class="card-head">
+                <h3>Xem trước video</h3>
+                <span class="tag" id="disc-preview-state">—</span>
+              </div>
+              <div class="row" id="disc-preview-row" hidden>
+                <select id="disc-preview-select" class="select-inline"></select>
+              </div>
+              <div id="disc-preview-box">
+                <div class="empty" id="disc-preview-empty">Chưa có video để xem trước.</div>
+                <video id="disc-preview-player" controls preload="metadata" hidden></video>
+                <img id="disc-preview-still" hidden alt="Khung hình thật đã đọc từ video" />
+              </div>
+            </div>
+
+            <div class="card card-head-panel">
+              <div class="card-head">
+                <h3>Video Lab (P2) — xem chi tiết ở trang Video Lab</h3>
+                <span class="tag" id="p2-lab-state">—</span>
+              </div>
+              <div class="row">
+                <button class="btn" id="btn-p2-goto">Mở Video Lab</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-panel" data-panel="versions">
+            <div class="card card-flush">
+              <div class="card-head"><h3>Phiên bản đã lưu</h3></div>
+              <div class="table-wrap"><table class="table" id="p1-runs-table"></table></div>
+            </div>
+          </div>
+
+          <div class="tab-panel" data-panel="pPublish">
+            <div class="card card-flush">
+              <div class="card-head">
+                <h3>Bài đăng của dự án</h3>
+                <span class="tag" id="project-pub-count">0</span>
+              </div>
+              <div id="project-pubs" class="stack">
+                <div class="empty">Dự án này chưa có bài đăng nào.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="tab-panel" data-panel="pHistory">
+            <div class="card card-flush">
+              <div class="card-head"><h3>Lịch sử của dự án</h3></div>
+              <div id="project-history" class="stack">
+                <div class="empty">Chưa có lịch sử.</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -281,16 +461,23 @@
             </div>
           </div>
           <div class="form-grid form-grid-3">
-            <label>Video trong run
-              <select id="p2-video" class="select-inline"></select>
-            </label>
-            <label>Auto Download Best
-              <select id="p2-auto" class="select-inline"><option value="off">OFF</option><option value="on">ON</option></select>
-            </label>
+            <div class="field">
+              <label class="field-label" for="p2-video">Video trong phiên bản</label>
+              <select id="p2-video" class="field-input"></select>
+              <p class="field-helper" id="p2-lab-context">Chọn dự án và phiên bản ở trang Dự án trước.</p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="p2-auto">Tự động tải video</label>
+              <select id="p2-auto" class="field-input field-narrow">
+                <option value="off">Tắt</option>
+                <option value="on">Bật</option>
+              </select>
+              <p class="field-helper">Chỉ lưu cài đặt. Không tải video khi bật/tắt.</p>
+            </div>
           </div>
           <div class="row">
             <button class="btn" id="btn-p2-detail">Xem chi tiết</button>
-            <button class="btn" id="btn-p2-download">Auto Download Best (1 video)</button>
+            <button class="btn btn-primary" id="btn-p2-download">Tải video đủ quyền</button>
           </div>
           <div id="p2-lab-out" class="stack"><div class="empty">Chọn run ở Dự án, rồi chọn video để xem Lab.</div></div>
         </div>
@@ -320,11 +507,11 @@
         <div class="card card-head-panel">
           <div class="panel-head">
             <div>
-              <h2 class="panel-title">Xuất bản</h2>
-              <p class="panel-meta">Caption → Duyệt → Lịch → Đăng. Chỉ PUBLISHED khi nền tảng trả URL xác minh.</p>
+              <p class="panel-meta">Caption → Duyệt → Lịch → Đăng. Chỉ ghi nhận đã đăng khi nền tảng trả URL xác minh.</p>
+              <p class="panel-meta" id="p3-project-context">Chưa chọn dự án — đang hiển thị tất cả dự án.</p>
             </div>
             <div class="panel-actions">
-              <button class="btn btn-primary" id="btn-p3-run">Chạy Auto Publish</button>
+              <span class="tag" id="p3-state">—</span>
             </div>
           </div>
         </div>
@@ -336,35 +523,101 @@
         </div>
 
         <div class="tab-panel active" data-panel="p3">
-          <div class="card card-flush">
-            <div class="card-head">
-              <h3>Publication</h3>
-              <span class="tag" id="p3-state">—</span>
+          <div class="pub-layout">
+            <div class="pub-main">
+              <div class="card card-flush">
+                <div class="card-head">
+                  <h3>01 — Chọn video</h3>
+                </div>
+                <div class="pub-body">
+                  <div class="field">
+                    <label class="field-label" for="p3-video">Video trong run</label>
+                    <select id="p3-video" class="field-input"></select>
+                    <p class="field-helper">Chọn video trong run hiện tại, sau đó tạo publication để soạn caption.</p>
+                  </div>
+                  <div class="row pub-actions">
+                    <button class="btn btn-primary" id="btn-p3-create">Tạo publication</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card card-flush">
+                <div class="card-head">
+                  <h3>02 — Nội dung bài đăng</h3>
+                </div>
+                <div class="pub-body">
+                  <div class="field">
+                    <label class="field-label" for="p3-caption">Caption</label>
+                    <textarea id="p3-caption" class="field-input" rows="4" placeholder="Nhập caption hiển thị cùng video"></textarea>
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="p3-tags">Hashtags</label>
+                    <textarea id="p3-tags" class="field-input field-mono" rows="3" placeholder="Mỗi dòng một thẻ, ví dụ:&#10;aigenerated&#10;tiktokvietnam"></textarea>
+                    <p class="field-helper">Mỗi dòng một thẻ, không cần dấu #. Dữ liệu vẫn lưu dạng danh sách như cũ.</p>
+                  </div>
+                  <div class="row pub-actions">
+                    <button class="btn" id="btn-p3-build">Tạo caption mẫu</button>
+                    <button class="btn" id="btn-p3-save">Lưu caption</button>
+                  </div>
+                  <div class="field">
+                    <span class="field-label">Danh sách bài đăng</span>
+                    <div id="p3-list" class="stack"><div class="empty">Chưa có publication.</div></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card card-flush">
+                <div class="card-head">
+                  <h3>03 — Thiết lập xuất bản</h3>
+                </div>
+                <div class="pub-body">
+                  <div class="pub-grid-2">
+                    <div class="field">
+                      <label class="field-label" for="p3-account">Tài khoản đích</label>
+                      <input id="p3-account" class="field-input" type="text" placeholder="v.quc.on" autocomplete="off">
+                      <p class="field-helper">Tài khoản TikTok sẽ đăng bài này.</p>
+                    </div>
+                    <div class="field">
+                      <label class="field-label" for="p3-schedule">Lịch đăng</label>
+                      <input id="p3-schedule" class="field-input" type="datetime-local">
+                      <p class="field-helper" id="p3-schedule-hint">Để trống = đăng ngay khi chạy. Giờ hiển thị theo máy của bạn, backend vẫn nhận chuẩn ISO.</p>
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label class="field-label" for="p3-auto">Chế độ Auto Publish</label>
+                    <select id="p3-auto" class="field-input field-narrow"><option value="off">Tắt — duyệt thủ công</option><option value="on">Bật — tự đăng bài đã duyệt</option></select>
+                  </div>
+                  <div class="row pub-actions">
+                    <button class="btn btn-primary" id="btn-p3-approve">Duyệt bài</button>
+                    <button class="btn" id="btn-p3-schedule">Đặt lịch</button>
+                    <button class="btn btn-ghost" id="btn-p3-run">Chạy Auto Publish</button>
+                  </div>
+                  <p class="note">Duyệt và đặt lịch là hai bước riêng. Đặt lịch không tự duyệt bài chưa duyệt.</p>
+                </div>
+              </div>
             </div>
-            <div class="form-grid form-grid-3">
-              <label>Auto Publish
-                <select id="p3-auto" class="select-inline"><option value="off">OFF</option><option value="on">ON</option></select>
-              </label>
-              <label>Video trong run (tạo publication)
-                <select id="p3-video" class="select-inline"></select>
-              </label>
-              <label>Lịch đăng (ISO, để trống = ngay)
-                <input id="p3-schedule" type="text" placeholder="2026-11-13T10:00:00">
-              </label>
-              <label>Tài khoản đích
-                <input id="p3-account" type="text" placeholder="v.quc.on">
-              </label>
-            </div>
-            <div class="row">
-              <button class="btn" id="btn-p3-create">Tạo publication</button>
-              <button class="btn" id="btn-p3-build">Tạo caption (không AI)</button>
-              <button class="btn btn-primary" id="btn-p3-save">Lưu caption</button>
-              <button class="btn btn-primary" id="btn-p3-approve">Duyệt</button>
-              <button class="btn" id="btn-p3-schedule">Đặt lịch</button>
-            </div>
-            <label>Caption <textarea id="p3-caption" rows="2"></textarea></label>
-            <label>Hashtags (mỗi dòng một thẻ) <textarea id="p3-tags" rows="2"></textarea></label>
-            <div id="p3-list" class="stack"><div class="empty">Chưa có publication.</div></div>
+
+            <aside class="pub-side">
+              <div class="card card-flush">
+                <div class="card-head">
+                  <h3>Trạng thái bài đăng</h3>
+                </div>
+                <div class="pub-body">
+                  <dl class="kv kv-side">
+                    <dt>Bài đang chọn</dt><dd id="p3-side-id">—</dd>
+                    <dt>Trạng thái</dt><dd id="p3-side-status">—</dd>
+                    <dt>Quyền sử dụng</dt><dd id="p3-side-rights">—</dd>
+                    <dt>Tài khoản đích</dt><dd id="p3-side-account">—</dd>
+                    <dt>Caption</dt><dd id="p3-side-caption">—</dd>
+                    <dt>Duyệt</dt><dd id="p3-side-approval">—</dd>
+                    <dt>Lịch đăng</dt><dd id="p3-side-schedule">—</dd>
+                  </dl>
+                  <div id="p3-side-link" class="side-link"></div>
+                  <p class="field-helper">Bước tiếp theo hiển thị theo trạng thái thật của publication đang chọn.</p>
+                  <div id="p3-side-next" class="side-next">Tạo hoặc chọn một publication để bắt đầu.</div>
+                </div>
+              </div>
+            </aside>
           </div>
         </div>
 
@@ -408,7 +661,7 @@
                 <input id="sched-check-hours" type="number" min="1" max="24" value="1">
               </label>
               <label>Chủ đề
-                <input id="sched-topic" type="text" placeholder="AI Music">
+                <input id="sched-topic" type="text" placeholder="Ví dụ: mẹo quay video đẹp bằng điện thoại">
               </label>
               <label class="span-2">Ngày trong tuần
                 <div class="chip-row" id="sched-days">
@@ -432,11 +685,12 @@
             <div class="table-wrap"><table class="table" id="sched-runs"></table></div>
           </div>
         </div>
-        </div>
       </div>
 
       <!-- ============================ ASSISTANT =========================== -->
-      <div class="view" data-view="assistant">
+      <!-- Hidden from the commercial UI. The DOM and the JS bindings stay so
+           the legacy view keeps working when it is reached from a link. -->
+      <div class="view" data-view="assistant" hidden>
         <div class="card">
           <div class="card-head">
             <h3>AI Assistant</h3>
@@ -612,6 +866,29 @@
           <div class="card-head"><h3>Search profiles</h3></div>
           <div class="table-wrap"><table class="table" id="prof-table"></table></div>
         </div>
+
+        <div class="card">
+          <div class="card-head"><h3 data-i18n="settings.appearance">Giao diện &amp; ngôn ngữ</h3></div>
+          <div class="form-grid form-grid-2">
+            <div class="field">
+              <label class="field-label" for="set-theme" data-i18n="settings.theme">Giao diện</label>
+              <select id="set-theme" class="field-input">
+                <option value="light" data-i18n="theme.light">Sáng</option>
+                <option value="dark" data-i18n="theme.dark">Tối</option>
+                <option value="system" data-i18n="theme.system">Theo hệ thống</option>
+              </select>
+              <p class="field-helper" data-i18n="settings.themeHelp">Áp dụng ngay, không cần tải lại trang.</p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="set-locale" data-i18n="settings.language">Ngôn ngữ</label>
+              <select id="set-locale" class="field-input">
+                <option value="vi">Tiếng Việt</option>
+                <option value="en">English</option>
+              </select>
+              <p class="field-helper" data-i18n="settings.languageHelp">Đổi ngôn ngữ hiển thị ngay trên toàn bộ giao diện.</p>
+            </div>
+          </div>
+        </div>
       </div>
 
     </section>
@@ -636,8 +913,35 @@
   </div>
 </div>
 
+<div class="modal" id="project-modal" hidden>
+  <div class="modal-box modal-box-narrow">
+    <div class="drawer-head">
+      <h3>Tạo dự án</h3>
+      <button class="icon-btn" id="btn-project-modal-close" title="Đóng">✕</button>
+    </div>
+    <form id="project-create-form" class="stack" novalidate>
+      <div class="field">
+        <label class="field-label" for="project-name">Tên dự án</label>
+        <input id="project-name" class="field-input" type="text" autocomplete="off">
+        <p class="field-helper">Tên hiển thị trong danh sách dự án.</p>
+        <p class="field-error" id="project-name-error" hidden></p>
+      </div>
+      <div class="field">
+        <label class="field-label" for="project-topic">Chủ đề tìm kiếm</label>
+        <input id="project-topic" class="field-input" type="text" autocomplete="off">
+        <p class="field-helper">Ví dụ: Naruto Shippuden</p>
+        <p class="field-error" id="project-topic-error" hidden></p>
+      </div>
+      <div class="row">
+        <button class="btn" type="button" id="btn-project-cancel">Hủy</button>
+        <button class="btn btn-primary" type="submit" id="btn-project-submit">Tạo dự án</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="toast-wrap" id="toasts"></div>
 
-<script src="/app.js?v=20261113-1"></script>
+<script src="/app.js?v=20261113-10"></script>
 </body>
 </html>

@@ -182,39 +182,18 @@ def is_tutorial_title(title: str) -> bool:
 def expand_topic_queries(topic: str, max_queries: int = MAX_TOPIC_QUERIES) -> list[str]:
     """Return the sub-queries used to collect candidates for one topic.
 
+    The expansion is GENERAL PURPOSE. It analyses the topic into its
+    concepts and intents, then builds several complementary search
+    directions. There is no hardcoded cluster for any particular subject,
+    so a Naruto or AI Music topic can never leak into another project.
+
     The queries are only a collection device; the content check later
-    decides what the video really is. An AI Music topic expands to its
-    sub-clusters (song, cover, remix, Suno, Udio). Any other topic is
-    searched as-is, so AI Music terms are never injected into it.
-    At most ``max_queries`` terms are returned so the platform quota and
-    the browser session stay bounded.
+    decides what the video really is. At most ``max_queries`` terms are
+    returned so the platform quota and the browser session stay bounded.
     """
-    base = str(topic or "").strip()
-    if not base:
-        return []
-    lowered = base.lower()
-    if "naruto" in lowered:
-        queries: list[str] = []
-        for term in NARUTO_QUERIES:
-            if term.lower() not in {item.lower() for item in queries}:
-                queries.append(term)
-            if len(queries) >= max_queries:
-                break
-        return queries
-    wants_ai = any(word in lowered for word in ("ai", "suno", "udio"))
-    wants_market = any(
-        word in lowered
-        for word in ("music", "song", "cover", "remix", "nhạc", "nhac")
-    )
-    if wants_ai and wants_market:
-        queries: list[str] = []
-        for term in [base, *AI_MUSIC_SUBQUERIES]:
-            if term.lower() not in {item.lower() for item in queries}:
-                queries.append(term)
-            if len(queries) >= max_queries:
-                break
-        return queries
-    return [base]
+    from query_planner import expand_topic_queries as _expand
+
+    return _expand(topic, max_queries=max_queries)
 
 
 @dataclass
@@ -936,6 +915,7 @@ def build_top5_cards(
     analyses_by_url: dict[str, Any] | None = None,
     limit: int = TOP5_LIMIT,
     subtopics: list[str] | None = None,
+    strict_preset: bool = False,
 ) -> list[dict[str, Any]]:
     """Build at most TOP 5 candidate cards from ranked trending scores.
 
@@ -944,6 +924,9 @@ def build_top5_cards(
     whose metadata passed but whose content verdict is UNKNOWN stay visible
     as NEEDS_REVIEW with pick=False, so they can never auto-post. No growth
     rate is invented — only real views/age/score are shown.
+
+    ``strict_preset`` turns the legacy fixed metadata gate back on. It is
+    OFF by default: the user's own filters are the only filters.
     """
     cards: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -976,15 +959,16 @@ def build_top5_cards(
         if not url or url in seen:
             continue
         seen.add(url)
-        # Strict metadata gate: 20s / 135d (or any views<5000,
-        # duration outside 30-60s, age>30d) NEVER enters TOP 5,
-        # even with manual user confirmation. No threshold lowering.
-        try:
-            _ok, _why = passes_strict_metadata(video)
-        except Exception:
-            _ok, _why = False, "strict check failed"
-        if not _ok:
-            continue
+        # NO hidden metadata gate. A candidate that the user asked to see is
+        # not dropped because of a fixed view / duration / age threshold.
+        # The strict preset is an explicit, opt-in compatibility mode only.
+        if strict_preset:
+            try:
+                _ok, _why = passes_strict_metadata(video)
+            except Exception:
+                _ok, _why = False, "strict check failed"
+            if not _ok:
+                continue
         # REJECTED videos (content_relevant is False) never become cards.
         # UNKNOWN videos stay visible as NEEDS_REVIEW with pick=False, so
         # they can never auto-post; only a manual user confirmation plus

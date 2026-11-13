@@ -171,9 +171,17 @@ def create_run(
     videos: list[dict],
     status: str = "COMPLETED",
     idempotency_key: str = "",
+    snapshot_extra: dict | None = None,
     db_path: Path = DB_PATH,
 ) -> dict:
-    """Create one immutable run version. Idempotent on idempotency_key."""
+    """Create one immutable run version. Idempotent on idempotency_key.
+
+    ``snapshot_extra`` extends the stored snapshot with the full research
+    dataset (the query plan, the candidate pool, the filter decisions, the
+    per-query diagnostics and the scoring evidence). It is stored inside the
+    existing ``snapshot_json`` column, so no schema migration is needed and
+    historical runs stay readable.
+    """
     init_db(db_path)
     if idempotency_key:
         existing = get_run_by_key(idempotency_key, db_path)
@@ -191,6 +199,12 @@ def create_run(
             "funnel": funnel,
             "top5": top5,
         }
+        # The extra research dataset is merged in, never replacing a key the
+        # historical contract already uses.
+        for key, value in (snapshot_extra or {}).items():
+            if key in ("project_id", "version", "queries", "filters", "funnel", "top5"):
+                continue
+            snapshot[key] = value
         conn.execute(
             "INSERT INTO runs(id,project_id,version,version_no,status,filters_json,"
             "queries_json,funnel_json,top5_json,snapshot_json,idempotency_key,created_at)"
