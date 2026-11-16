@@ -26,3 +26,14 @@
 - Update `PROJECT_MASTER.md` and `PROGRESS.md` when module status or verification status changes.
 - Record blockers honestly and do not claim unimplemented behavior.
 - Stop when the requested phase is complete.
+
+## Documentation maintenance (TOOLTDH knowledge base)
+
+- Khi thêm file: cập nhật `docs/FILE_INDEX.md` + tạo trang `docs/files/<path_mirrored>.md`.
+- Khi sửa trách nhiệm/API: cập nhật trang file + trang module tương ứng trong `docs/modules/`.
+- Khi sửa bug: bổ sung `docs/TROUBLESHOOTING.md` nếu có thông tin chẩn đoán mới.
+- Khi thêm tính năng: cập nhật `docs/DEVELOPMENT_ROADMAP.md` (không ghi tương lai thành đã xong).
+- Khi đổi kiến trúc: cập nhật `docs/TECHNICAL_DECISIONS.md`.
+- Khi phát hành: cập nhật `docs/CHANGELOG.md` + `docs/RELEASE_CHECKLIST.md`.
+- Kiểm tra định kỳ: `py docs/check_docs.py` (link + độ phủ file). Script nhẹ, idempotent, không gọi AI.
+- Không đưa secrets/.env/DB/log riêng/media vào tài liệu; thông tin chưa xác minh ghi "CHƯA XÁC MINH".
