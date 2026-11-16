@@ -10,3 +10,6 @@
 8. Publish cần approve + media thật + claim UPLOADING nguyên tử; chỉ `/video/<id>` xác minh mới tính PUBLISHED.
 9. Không bypass captcha/bot-detection/rate-limit; fail-closed.
 10. Secrets từ env; `.env.example` placeholder only; docs không chứa secrets/DB/log/media.
+11. Business modules giữ top-level (không di dời vào package) — import chéo + spec hiddenimports + 34 scripts tham chiếu trực tiếp; di dời = rủi ro circular import. Gọn gàng bằng VS Code file nesting.
+12. Không rename module đang chạy chỉ để "đẹp hơn" (`brain.py` giữ nguyên, defer sang major version với compat shim).
+13. `core/`, `modules/`, `app/`, `models/`, `integrations/` để trống (không tracked) — không tạo package rỗng chỉ để đẹp mắt.

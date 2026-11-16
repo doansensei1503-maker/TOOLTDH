@@ -2,8 +2,8 @@
 
 - Chức năng: Testing & Packaging.
 - File:
-- [`_run_browser_acceptance.py`](../files/_run_browser_acceptance_py.md)
-- [`_restart_dashboard.py`](../files/_restart_dashboard_py.md)
+- [`_run_browser_acceptance.py`](../files/tests/browser/_run_browser_acceptance_py.md)
+- [`_restart_dashboard.py`](../files/scripts/development/_restart_dashboard_py.md)
 - [`tooldh_portable.py`](../files/tooldh_portable_py.md)
 - [`tooldh_portable.spec`](../files/tooldh_portable_spec.md)
 - [`requirements.txt`](../files/requirements_txt.md)

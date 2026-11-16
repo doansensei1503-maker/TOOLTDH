@@ -5,6 +5,11 @@ Bắt đầu tại đây. Mọi liên kết mở được trên GitHub.
 ## Điều hướng
 
 - [FILE_INDEX](FILE_INDEX.md) — danh mục toàn bộ mã nguồn → từng trang file.
+- [FILE_CATALOG](FILE_CATALOG.md) — chỉ mục tra cứu trung tâm (file nào làm gì).
+- [RESTRUCTURE_AUDIT](RESTRUCTURE_AUDIT.md) — kiểm chứng tái cấu trúc (VERIFIED/INCOMPLETE/BLOCKED).
+- [FILE_RENAME_MAP](FILE_RENAME_MAP.md) — audit tên file (0 rename, lý do giữ `brain.py`).
+- [MAINTENANCE_GUIDE](MAINTENANCE_GUIDE.md) — quy tắc duy trì docs (bắt buộc).
+- [WINDOWS_PACKAGING_STATUS](WINDOWS_PACKAGING_STATUS.md) — trạng thái đóng gói portable.
 - [MODULE_ARCHITECTURE](MODULE_ARCHITECTURE.md) — kiến trúc + 10 nhóm chức năng.
 - [TROUBLESHOOTING](TROUBLESHOOTING.md) — bản đồ triệu chứng → file/hàm/log/lệnh.
 - [DEVELOPMENT_ROADMAP](DEVELOPMENT_ROADMAP.md) — kế hoạch dài hạn 7 giai đoạn.

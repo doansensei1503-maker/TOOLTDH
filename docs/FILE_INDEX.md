@@ -40,35 +40,37 @@
 | `tooldh_portable.spec` | Testing & Packaging | [tooldh_portable.spec](files/tooldh_portable_spec.md) |
 | `.env.example` | Testing & Packaging | [.env.example](files/_env_example.md) |
 | `build_hooks/hook-workflow.py` | Testing & Packaging | [hook-workflow.py](files/build_hooks/hook-workflow_py.md) |
-| `_accept_p4a6.py` | Testing & Packaging | [_accept_p4a6.py](files/_accept_p4a6_py.md) |
-| `_check_3fixes.py` | Testing & Packaging | [_check_3fixes.py](files/_check_3fixes_py.md) |
-| `_check_discovery_ai.py` | Testing & Packaging | [_check_discovery_ai.py](files/_check_discovery_ai_py.md) |
-| `_check_discovery_retry.py` | Testing & Packaging | [_check_discovery_retry.py](files/_check_discovery_retry_py.md) |
-| `_check_funnel_naruto.py` | Testing & Packaging | [_check_funnel_naruto.py](files/_check_funnel_naruto_py.md) |
-| `_check_local_analyzer.py` | Testing & Packaging | [_check_local_analyzer.py](files/_check_local_analyzer_py.md) |
-| `_check_local_audio.py` | Testing & Packaging | [_check_local_audio.py](files/_check_local_audio_py.md) |
-| `_check_local_vision.py` | Testing & Packaging | [_check_local_vision.py](files/_check_local_vision_py.md) |
-| `_check_p1_rebuild.py` | Testing & Packaging | [_check_p1_rebuild.py](files/_check_p1_rebuild_py.md) |
-| `_check_p2_lab.py` | Testing & Packaging | [_check_p2_lab.py](files/_check_p2_lab_py.md) |
-| `_check_p32_publish.py` | Testing & Packaging | [_check_p32_publish.py](files/_check_p32_publish_py.md) |
-| `_check_p3_publish.py` | Testing & Packaging | [_check_p3_publish.py](files/_check_p3_publish_py.md) |
-| `_check_pipeline.py` | Testing & Packaging | [_check_pipeline.py](files/_check_pipeline_py.md) |
-| `_check_publish_retention.py` | Testing & Packaging | [_check_publish_retention.py](files/_check_publish_retention_py.md) |
-| `_check_smart_evaluation.py` | Testing & Packaging | [_check_smart_evaluation.py](files/_check_smart_evaluation_py.md) |
-| `_check_smart_gate.py` | Testing & Packaging | [_check_smart_gate.py](files/_check_smart_gate_py.md) |
-| `_check_snaptik.py` | Testing & Packaging | [_check_snaptik.py](files/_check_snaptik_py.md) |
-| `_make_probe_model.py` | Testing & Packaging | [_make_probe_model.py](files/_make_probe_model_py.md) |
-| `_p1_acceptance.py` | Testing & Packaging | [_p1_acceptance.py](files/_p1_acceptance_py.md) |
-| `_smoke_b1.py` | Testing & Packaging | [_smoke_b1.py](files/_smoke_b1_py.md) |
-| `p15v_cdp_upload_probe.py` | Testing & Packaging | [p15v_cdp_upload_probe.py](files/p15v_cdp_upload_probe_py.md) |
-| `p15v_check_approval.py` | Testing & Packaging | [p15v_check_approval.py](files/p15v_check_approval_py.md) |
-| `p15v_cleanup_tabs.py` | Testing & Packaging | [p15v_cleanup_tabs.py](files/p15v_cleanup_tabs_py.md) |
-| `p15v_cleanup_uploads.py` | Testing & Packaging | [p15v_cleanup_uploads.py](files/p15v_cleanup_uploads_py.md) |
-| `p15v_dom_snapshot.py` | Testing & Packaging | [p15v_dom_snapshot.py](files/p15v_dom_snapshot_py.md) |
-| `p15v_draft_count.py` | Testing & Packaging | [p15v_draft_count.py](files/p15v_draft_count_py.md) |
-| `p15v_draft_list.py` | Testing & Packaging | [p15v_draft_list.py](files/p15v_draft_list_py.md) |
-| `p15v_inspect.py` | Testing & Packaging | [p15v_inspect.py](files/p15v_inspect_py.md) |
-| `p15v_make_clip.py` | Testing & Packaging | [p15v_make_clip.py](files/p15v_make_clip_py.md) |
-| `p15v_make_wf_state.py` | Testing & Packaging | [p15v_make_wf_state.py](files/p15v_make_wf_state_py.md) |
-| `p15v_probe_codec.py` | Testing & Packaging | [p15v_probe_codec.py](files/p15v_probe_codec_py.md) |
-| `p15v_run_poster.py` | Testing & Packaging | [p15v_run_poster.py](files/p15v_run_poster_py.md) |
+| `scripts/diagnostics/_accept_p4a6.py` | Scripts/Tests | [_accept_p4a6.py](files/scripts/diagnostics/_accept_p4a6_py.md) |
+| `scripts/diagnostics/_check_3fixes.py` | Scripts/Tests | [_check_3fixes.py](files/scripts/diagnostics/_check_3fixes_py.md) |
+| `scripts/diagnostics/_check_discovery_ai.py` | Scripts/Tests | [_check_discovery_ai.py](files/scripts/diagnostics/_check_discovery_ai_py.md) |
+| `scripts/diagnostics/_check_discovery_retry.py` | Scripts/Tests | [_check_discovery_retry.py](files/scripts/diagnostics/_check_discovery_retry_py.md) |
+| `scripts/diagnostics/_check_funnel_naruto.py` | Scripts/Tests | [_check_funnel_naruto.py](files/scripts/diagnostics/_check_funnel_naruto_py.md) |
+| `scripts/diagnostics/_check_local_analyzer.py` | Scripts/Tests | [_check_local_analyzer.py](files/scripts/diagnostics/_check_local_analyzer_py.md) |
+| `scripts/diagnostics/_check_local_audio.py` | Scripts/Tests | [_check_local_audio.py](files/scripts/diagnostics/_check_local_audio_py.md) |
+| `scripts/diagnostics/_check_local_vision.py` | Scripts/Tests | [_check_local_vision.py](files/scripts/diagnostics/_check_local_vision_py.md) |
+| `scripts/diagnostics/_check_p1_rebuild.py` | Scripts/Tests | [_check_p1_rebuild.py](files/scripts/diagnostics/_check_p1_rebuild_py.md) |
+| `scripts/diagnostics/_check_p2_lab.py` | Scripts/Tests | [_check_p2_lab.py](files/scripts/diagnostics/_check_p2_lab_py.md) |
+| `scripts/diagnostics/_check_p32_publish.py` | Scripts/Tests | [_check_p32_publish.py](files/scripts/diagnostics/_check_p32_publish_py.md) |
+| `scripts/diagnostics/_check_p3_publish.py` | Scripts/Tests | [_check_p3_publish.py](files/scripts/diagnostics/_check_p3_publish_py.md) |
+| `scripts/diagnostics/_check_pipeline.py` | Scripts/Tests | [_check_pipeline.py](files/scripts/diagnostics/_check_pipeline_py.md) |
+| `scripts/diagnostics/_check_publish_retention.py` | Scripts/Tests | [_check_publish_retention.py](files/scripts/diagnostics/_check_publish_retention_py.md) |
+| `scripts/diagnostics/_check_smart_evaluation.py` | Scripts/Tests | [_check_smart_evaluation.py](files/scripts/diagnostics/_check_smart_evaluation_py.md) |
+| `scripts/diagnostics/_check_smart_gate.py` | Scripts/Tests | [_check_smart_gate.py](files/scripts/diagnostics/_check_smart_gate_py.md) |
+| `scripts/diagnostics/_check_snaptik.py` | Scripts/Tests | [_check_snaptik.py](files/scripts/diagnostics/_check_snaptik_py.md) |
+| `scripts/diagnostics/_make_probe_model.py` | Scripts/Tests | [_make_probe_model.py](files/scripts/diagnostics/_make_probe_model_py.md) |
+| `scripts/diagnostics/_p1_acceptance.py` | Scripts/Tests | [_p1_acceptance.py](files/scripts/diagnostics/_p1_acceptance_py.md) |
+| `scripts/diagnostics/_smoke_b1.py` | Scripts/Tests | [_smoke_b1.py](files/scripts/diagnostics/_smoke_b1_py.md) |
+| `scripts/development/p15v_cdp_upload_probe.py` | Scripts/Tests | [p15v_cdp_upload_probe.py](files/scripts/development/p15v_cdp_upload_probe_py.md) |
+| `scripts/development/p15v_check_approval.py` | Scripts/Tests | [p15v_check_approval.py](files/scripts/development/p15v_check_approval_py.md) |
+| `scripts/development/p15v_cleanup_tabs.py` | Scripts/Tests | [p15v_cleanup_tabs.py](files/scripts/development/p15v_cleanup_tabs_py.md) |
+| `scripts/development/p15v_cleanup_uploads.py` | Scripts/Tests | [p15v_cleanup_uploads.py](files/scripts/development/p15v_cleanup_uploads_py.md) |
+| `scripts/development/p15v_dom_snapshot.py` | Scripts/Tests | [p15v_dom_snapshot.py](files/scripts/development/p15v_dom_snapshot_py.md) |
+| `scripts/development/p15v_draft_count.py` | Scripts/Tests | [p15v_draft_count.py](files/scripts/development/p15v_draft_count_py.md) |
+| `scripts/development/p15v_draft_list.py` | Scripts/Tests | [p15v_draft_list.py](files/scripts/development/p15v_draft_list_py.md) |
+| `scripts/development/p15v_inspect.py` | Scripts/Tests | [p15v_inspect.py](files/scripts/development/p15v_inspect_py.md) |
+| `scripts/development/p15v_make_clip.py` | Scripts/Tests | [p15v_make_clip.py](files/scripts/development/p15v_make_clip_py.md) |
+| `scripts/development/p15v_make_wf_state.py` | Scripts/Tests | [p15v_make_wf_state.py](files/scripts/development/p15v_make_wf_state_py.md) |
+| `scripts/development/p15v_probe_codec.py` | Scripts/Tests | [p15v_probe_codec.py](files/scripts/development/p15v_probe_codec_py.md) |
+| `scripts/development/p15v_run_poster.py` | Scripts/Tests | [p15v_run_poster.py](files/scripts/development/p15v_run_poster_py.md) |
+| `scripts/development/_restart_dashboard.py` | Scripts/Tests | [_restart_dashboard.py](files/scripts/development/_restart_dashboard_py.md) |
+| `tests/browser/_run_browser_acceptance.py` | Scripts/Tests | [_run_browser_acceptance.py](files/tests/browser/_run_browser_acceptance_py.md) |

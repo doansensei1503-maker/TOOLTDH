@@ -19,4 +19,5 @@ c14601c P2 lab: video detail + ffprobe measure cache + best-permitted auto downl
 
 - Gần nhất: search-job thread-safe (atomic guard, uuid job_id, terminal bất biến, stale-restart reap, SQLite IntegrityError race) + probe offline 6/6 OK.
 - Trước đó: acceptance 15/15 + 5 defect UI/search (filter autosave, loader view, TOP5 tab, batch thread).
+- 17/11/2026: tái cấu trúc scripts/tests (`scripts/diagnostics/`, `scripts/development/`, `tests/browser/`) + audit giữ 30 business modules tại root + `FILE_CATALOG`/`RESTRUCTURE_AUDIT`/`FILE_RENAME_MAP`/`MAINTENANCE_GUIDE`/`WINDOWS_PACKAGING_STATUS` + README thư mục; `check_docs` 123/0, `dry-run ready`, P1 acceptance 158/162 (4 lỗi planner đã biết), Dashboard 8777 trực tiếp xác minh (title + snapshot + `/api/overview` 200).
 - Chi tiết đầy đủ xem `git log` và từng trang `docs/files/`.
